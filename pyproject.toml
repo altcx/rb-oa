@@ -2,9 +2,21 @@
 name = "puzzle-copilot"
 version = "2.0.0"
 description = "Real-time copilot for timed optimization puzzles. Reads the screen, solves deterministically, narrates."
-requires-python = ">=3.12"
+
+# Windows is the production platform; Linux/macOS are where the tests were
+# written.  3.12 is the supported line on both, and the upper bound is
+# deliberate: ortools and scipy publish cp312 wheels for win_amd64, and a user
+# who installs 3.13 discovers the gap by watching pip try to build ortools from
+# source ten minutes before a timed run.  Pin the interpreter, not the pain.
+requires-python = ">=3.12,<3.13"
+
 dependencies = [
     "fastapi>=0.115",
+    # [standard] pulls uvloop, which is POSIX-only.  Upstream already gates it
+    # (`uvloop>=0.15.1; sys_platform != 'win32' and ...`), so on Windows pip
+    # simply skips it and uvicorn falls back to the asyncio event loop -- no
+    # error, no action needed.  httptools and websockets, the other two parts
+    # of [standard] we actually rely on, do ship win_amd64 wheels.
     "uvicorn[standard]>=0.32",
     "websockets>=13",
     "pydantic>=2.9",
@@ -13,10 +25,29 @@ dependencies = [
     "scipy>=1.14",
     "ortools>=9.11",
     "pillow>=10.4",
+    # Screen capture and the global hotkey.  Both are Windows-clean:
+    # mss uses ctypes against user32/gdi32, and pynput ships a pure-python
+    # universal wheel whose only Windows requirement is `six` (its evdev and
+    # python-xlib dependencies are Linux-gated and never fetched on win32).
     "mss>=9.0",
-    "pynput>=1.7",
+    "pynput>=1.7.7",
+    # The OS credential store.  On Windows this resolves to
+    # keyring.backends.Windows.WinVaultKeyring (the Credential Locker), which
+    # needs pywin32-ctypes.  keyring already declares that under a win32
+    # marker; it is repeated here so the backend cannot silently disappear if
+    # keyring ever restructures its own dependencies, because losing it
+    # downgrades key storage to the ACL-restricted file fallback.
+    "pywin32-ctypes>=0.2.0; sys_platform == 'win32'",
     "keyring>=25.4",
     "python-multipart>=0.0.12",
+]
+
+classifiers = [
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Private :: Do Not Upload",
 ]
 
 [project.optional-dependencies]

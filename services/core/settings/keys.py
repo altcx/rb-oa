@@ -7,7 +7,17 @@ Three rules (spec 9.1, 13):
     stored.  A typo'd key that silently persists costs the user a whole run.
 2.  The key lives in the OS credential store via ``keyring``.  Never in the
     repo, never in the browser, never in ``localStorage``.  The fallback is a
-    0600 file under ``data/.secrets/`` and the UI is told which one is in use.
+    file under ``data/.secrets/`` restricted to the current user, and the UI is
+    told which one is in use *and how it is protected*.
+
+    "Restricted" means different things on different platforms and the code has
+    to mean the one that is true.  On POSIX it is mode ``0600``.  On Windows
+    ``os.chmod`` only toggles the read-only attribute -- it does **not** stop
+    another local account reading the file -- so the fallback is locked down
+    with an explicit ACL (``icacls /inheritance:r /grant:r <user>:F``), the ACL
+    is read back to confirm it took, and if it did not the key is **not**
+    written at all.  Claiming protection we do not have is worse than refusing
+    to store: the user would carry on believing the secret was safe.
 3.  Redaction is installed on *every* log sink, and covers exception
     tracebacks -- the path that actually leaks keys in practice, because the
     key is usually an argument to the call that raised.
@@ -18,6 +28,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess
 import traceback
 from pathlib import Path
 from typing import Any, Iterable
@@ -180,6 +191,16 @@ class KeyValidationError(RuntimeError):
     pass
 
 
+class KeyStorageError(RuntimeError):
+    """Raised when the key cannot be stored *safely*.
+
+    Not "the write failed" -- "the write would have succeeded but the file
+    would have been readable by other accounts on this machine".  Refusing is
+    the only honest option, because the alternative is a UI that reports a
+    protection the filesystem is not enforcing.
+    """
+
+
 def _key_info_from(payload: dict[str, Any]) -> KeyInfo:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     return KeyInfo(
@@ -244,6 +265,123 @@ def _keyring():
     return keyring
 
 
+def _is_windows() -> bool:
+    """Single place to ask, so tests can monkeypatch ``os.name`` and mean it."""
+    return os.name == "nt"
+
+
+# -- Windows ACLs -----------------------------------------------------------
+#
+# ``icacls`` is a real executable in System32, so this never needs a shell.
+# CREATE_NO_WINDOW keeps a console from flashing up when the app is started
+# from a shortcut rather than a terminal.
+
+#: Principals that must not appear in the fallback file's ACL.  If any of these
+#: can read it, the file is not protected no matter what else is in there.
+#: ``users:`` carries the colon deliberately -- it matches the ACE
+#: ``BUILTIN\Users:(RX)`` but not the ordinary path ``C:\Users\bob\...`` that
+#: shares the first line of icacls output with it.
+_ACL_FORBIDDEN = (
+    "everyone",
+    "authenticated users",
+    "builtin\\users",
+    "users:",
+    "interactive",
+    "\\administrators",
+)
+
+
+def _windows_principal() -> str:
+    """The account to grant.  Domain-qualified when we can, bare name if not."""
+    user = os.environ.get("USERNAME") or ""
+    if not user:
+        try:
+            import getpass
+
+            user = getpass.getuser()
+        except Exception:  # pragma: no cover - defensive
+            user = ""
+    domain = os.environ.get("USERDOMAIN") or ""
+    if user and domain:
+        return f"{domain}\\{user}"
+    return user
+
+
+def _run_icacls(args: list[str]) -> subprocess.CompletedProcess:
+    kwargs: dict[str, Any] = dict(capture_output=True, text=True, shell=False, timeout=20)
+    flag = getattr(subprocess, "CREATE_NO_WINDOW", None)
+    if flag:
+        kwargs["creationflags"] = flag
+    return subprocess.run(["icacls", *args], **kwargs)
+
+
+def _windows_restrict_acl(path: Path, *, container: bool = False) -> bool:
+    """Drop inheritance and grant only the current user.  True if icacls said OK."""
+    principal = _windows_principal()
+    if not principal:
+        return False
+    grant = f"{principal}:(OI)(CI)F" if container else f"{principal}:F"
+    try:
+        proc = _run_icacls([str(path), "/inheritance:r", "/grant:r", grant])
+    except Exception:  # icacls missing, timeout, permission -- all mean "no"
+        return False
+    return proc.returncode == 0
+
+
+def _windows_acl_is_restricted(path: Path) -> bool:
+    """Read the ACL back and check nobody but the current user is on it.
+
+    Verification is the point of the exercise.  ``icacls /grant:r`` can return
+    0 and still leave an inherited ACE behind if the ``/inheritance:r`` half was
+    refused, and an inherited ACE from ``C:\\Users\\Public``-style ancestry is
+    exactly the case that leaves the key world-readable.
+    """
+    principal = _windows_principal()
+    if not principal:
+        return False
+    try:
+        proc = _run_icacls([str(path)])
+    except Exception:
+        return False
+    if proc.returncode != 0:
+        return False
+    bare = principal.split("\\")[-1].lower()
+    saw_owner = False
+    for line in (proc.stdout or "").splitlines():
+        text = line.strip()
+        if not text or text.lower().startswith("successfully processed"):
+            continue
+        # The first line is "<path> <ACE>"; strip the path off it.
+        ace = text[len(str(path)):].strip() if text.startswith(str(path)) else text
+        if not ace:
+            continue
+        low = ace.lower()
+        if "(i)" in low:  # an inherited ACE means /inheritance:r did not take
+            return False
+        if any(bad in low for bad in _ACL_FORBIDDEN):
+            return False
+        if bare in low or principal.lower() in low:
+            saw_owner = True
+    return saw_owner
+
+
+def _fallback_protection() -> str:
+    """The *actual* protection on the fallback file, never the intended one."""
+    if not FALLBACK_KEY_PATH.exists():
+        return "not yet created"
+    if _is_windows():
+        return "ACL-restricted" if _windows_acl_is_restricted(FALLBACK_KEY_PATH) else "UNPROTECTED"
+    try:
+        mode = FALLBACK_KEY_PATH.stat().st_mode & 0o777
+    except OSError:  # pragma: no cover - defensive
+        return "unknown"
+    return "mode 0600" if mode == 0o600 else f"mode {mode:04o} (UNPROTECTED)"
+
+
+def _file_backend() -> str:
+    return f"file:{FALLBACK_KEY_PATH} ({_fallback_protection()})"
+
+
 def storage_backend() -> str:
     """Human-readable name of where the key lives, for the settings UI."""
     kr = _keyring()
@@ -252,11 +390,30 @@ def storage_backend() -> str:
             return f"keyring:{type(kr.get_keyring()).__name__}"
         except Exception:
             pass
-    return f"file:{FALLBACK_KEY_PATH}"
+    return _file_backend()
+
+
+_UNPROTECTED_MSG = (
+    "Refusing to write the OpenRouter key to disk: this machine has no working "
+    "keyring backend, and the file fallback could not be restricted with an ACL, "
+    "so every other account on this PC could read it. Fix the credential store "
+    "instead -- on Windows the Credential Locker backend ships with `keyring`, so "
+    "this usually means `keyring` is not installed in the active venv "
+    "(`.venv\\Scripts\\python.exe -m pip install keyring`). As a stopgap, set the "
+    "OPENROUTER_API_KEY environment variable for the session instead of storing it."
+)
 
 
 def _write_fallback(key: str) -> None:
+    """Write the fallback file, or raise rather than write it unprotected."""
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    if _is_windows():
+        _write_fallback_windows(key)
+    else:
+        _write_fallback_posix(key)
+
+
+def _write_fallback_posix(key: str) -> None:
     try:
         os.chmod(SECRETS_DIR, 0o700)
     except OSError:  # pragma: no cover - platform dependent
@@ -270,11 +427,40 @@ def _write_fallback(key: str) -> None:
         pass
 
 
+def _write_fallback_windows(key: str) -> None:
+    """Create empty, lock down, verify, *then* write the secret.
+
+    Order matters.  A file created with inherited ACLs is readable from the
+    instant it exists, so writing first and restricting second leaves a window
+    -- short, but a background indexer or another user's process only needs
+    one read.  An empty file leaking is harmless.
+    """
+    _windows_restrict_acl(SECRETS_DIR, container=True)  # best effort on the dir
+
+    fd = os.open(FALLBACK_KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.close(fd)
+
+    applied = _windows_restrict_acl(FALLBACK_KEY_PATH)
+    if not (applied and _windows_acl_is_restricted(FALLBACK_KEY_PATH)):
+        try:
+            os.unlink(FALLBACK_KEY_PATH)
+        except OSError:  # pragma: no cover - defensive
+            pass
+        raise KeyStorageError(_UNPROTECTED_MSG)
+
+    with open(FALLBACK_KEY_PATH, "w", encoding="utf-8") as fh:
+        fh.write(key)
+
+
 def store_key(key: str, info: KeyInfo) -> str:
     """Persist a **validated** key.  Returns the backend used.
 
     ``info`` must come from :func:`validate_key` and must be ``valid``; this is
     the enforcement point for "never accept an unvalidated key".
+
+    Raises :class:`KeyStorageError` when neither the keyring nor a *properly
+    restricted* file is available.  Callers should surface that verbatim: it is
+    actionable, and the alternative is a silently readable secret.
     """
     if not isinstance(info, KeyInfo) or not info.valid:
         raise KeyValidationError(
@@ -288,7 +474,7 @@ def store_key(key: str, info: KeyInfo) -> str:
         except Exception:
             pass
     _write_fallback(key)
-    return f"file:{FALLBACK_KEY_PATH}"
+    return _file_backend()
 
 
 async def validate_and_store(

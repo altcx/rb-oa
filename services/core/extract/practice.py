@@ -92,7 +92,11 @@ class Fixture:
 
 
 def load_fixture(path: Path) -> Fixture:
-    data = json.loads(Path(path).read_text())
+    # Explicit encoding: on Windows the text-mode default is the ANSI code page
+    # (cp1252), not UTF-8, so a fixture whose ground truth holds a non-ASCII
+    # label would either raise or silently mojibake on the way in -- and then
+    # score as a mismatch against a reader that got it right.
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     base = Path(path).parent
     return Fixture(
         fixture_id=data["fixture_id"],
@@ -495,7 +499,31 @@ def _build_client(args: argparse.Namespace, fixture_dir: Path, puzzle: str) -> L
     return OpenRouterClient()
 
 
+def _enable_utf8_console() -> bool:
+    """Force stdout/stderr to UTF-8 with replacement before anything prints.
+
+    The report body is ASCII, but the values interpolated into it are not under
+    our control: a model slug, a fixture id, or a value a vision model read off
+    the screen can be any codepoint at all.  On a legacy Windows console
+    (cp1252) that is a ``UnicodeEncodeError`` at print time, which loses the
+    whole practice run rather than one character of one line.  Guarded, because
+    a detached or already-wrapped stream has no ``reconfigure``.
+    """
+    ok = True
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            ok = False
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            ok = False
+    return ok
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _enable_utf8_console()
     ap = argparse.ArgumentParser(prog="practice", description=__doc__.split("\n")[0])
     ap.add_argument("--fixtures", required=True, help="directory of fixture sidecars")
     ap.add_argument("--puzzle", default="factory", choices=["factory", "builder"])

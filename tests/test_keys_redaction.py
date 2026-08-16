@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 
 import httpx
 import pytest
@@ -159,15 +160,53 @@ def test_storage_backend_is_reportable():
     assert backend.startswith("keyring:") or backend.startswith("file:")
 
 
-def test_fallback_file_roundtrip_is_0600(tmp_path, monkeypatch):
+@pytest.fixture
+def fallback_dir(tmp_path, monkeypatch):
+    """Point the fallback at a temp dir with no keyring behind it."""
     monkeypatch.setattr(keys, "SECRETS_DIR", tmp_path / ".secrets")
     monkeypatch.setattr(keys, "FALLBACK_KEY_PATH", tmp_path / ".secrets" / "openrouter.key")
     monkeypatch.setattr(keys, "_keyring", lambda: None)
+    return tmp_path
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not exist on Windows")
+def test_fallback_file_roundtrip_is_0600_on_posix(fallback_dir):
+    """On POSIX the protection *is* the mode bits, so assert them."""
     backend = keys.store_key(KEY, keys.KeyInfo(valid=True, label="ok"))
     assert backend.startswith("file:")
+    assert "mode 0600" in backend
     assert keys.load_key() == KEY
     mode = keys.FALLBACK_KEY_PATH.stat().st_mode & 0o777
     assert mode == 0o600
+    keys.delete_key()
+    assert not keys.FALLBACK_KEY_PATH.exists()
+
+
+def test_fallback_roundtrip_on_windows_goes_through_the_acl_path(fallback_dir, monkeypatch):
+    """Same round trip mocked as Windows: ``chmod`` is not the protection there.
+
+    ``mode == 0o600`` cannot hold on NTFS, so the platform-correct assertion is
+    that the ACL restriction was applied *and verified* for the key file.
+    """
+    monkeypatch.setattr(keys.os, "name", "nt")
+    monkeypatch.setenv("USERNAME", "puzzler")
+    monkeypatch.setenv("USERDOMAIN", "DESKTOP-1")
+
+    restricted: list[str] = []
+
+    def fake_restrict(path, *, container=False):
+        restricted.append(str(path))
+        return True
+
+    monkeypatch.setattr(keys, "_windows_restrict_acl", fake_restrict)
+    monkeypatch.setattr(keys, "_windows_acl_is_restricted", lambda path: True)
+
+    backend = keys.store_key(KEY, keys.KeyInfo(valid=True, label="ok"))
+
+    assert str(keys.FALLBACK_KEY_PATH) in restricted, "the key file itself must be locked down"
+    assert backend.startswith("file:")
+    assert "ACL-restricted" in backend
+    assert keys.load_key() == KEY
     keys.delete_key()
     assert not keys.FALLBACK_KEY_PATH.exists()
 
