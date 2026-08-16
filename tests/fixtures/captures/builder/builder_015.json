@@ -1,0 +1,372 @@
+{
+ "fixture_id": "builder_015",
+ "puzzle_type": "builder",
+ "image": "builder_015.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "P1",
+   "box": {
+    "x": 40,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P2",
+   "box": {
+    "x": 384,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P3",
+   "box": {
+    "x": 40,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P4",
+   "box": {
+    "x": 384,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P5",
+   "box": {
+    "x": 40,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P6",
+   "box": {
+    "x": 384,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "obstacles",
+   "box": {
+    "x": 740,
+    "y": 70,
+    "w": 340,
+    "h": 284
+   },
+   "target": "builder_obstacles",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "rules",
+   "box": {
+    "x": 740,
+    "y": 378,
+    "w": 340,
+    "h": 260
+   },
+   "target": "builder_instructions",
+   "max_long_edge": 1568
+  }
+ ],
+ "region_truth": {
+  "P1": {
+   "id": "P1",
+   "name": "tank-71",
+   "weight": 10,
+   "qty_available": 1,
+   "attributes": {
+    "power": 8,
+    "lift": 6,
+    "grip": 5
+   },
+   "cost": 10
+  },
+  "P2": {
+   "id": "P2",
+   "name": "wheel-66",
+   "weight": 5,
+   "qty_available": 1,
+   "attributes": {
+    "power": 6,
+    "lift": 4,
+    "grip": 0
+   },
+   "cost": 15
+  },
+  "P3": {
+   "id": "P3",
+   "name": "brace-87",
+   "weight": 5,
+   "qty_available": 2,
+   "attributes": {
+    "power": 7,
+    "lift": 7,
+    "grip": 9
+   },
+   "cost": 25
+  },
+  "P4": {
+   "id": "P4",
+   "name": "frame-69",
+   "weight": 8,
+   "qty_available": 1,
+   "attributes": {
+    "power": 7,
+    "lift": 4,
+    "grip": 2
+   },
+   "cost": 15
+  },
+  "P5": {
+   "id": "P5",
+   "name": "engine-33",
+   "weight": 12,
+   "qty_available": 2,
+   "attributes": {
+    "power": 9,
+    "lift": 0,
+    "grip": 7
+   },
+   "cost": 15
+  },
+  "P6": {
+   "id": "P6",
+   "name": "brace-21",
+   "weight": 11,
+   "qty_available": 3,
+   "attributes": {
+    "power": 6,
+    "lift": 8,
+    "grip": 8
+   },
+   "cost": 0
+  },
+  "obstacles": {
+   "obstacles": [
+    {
+     "id": "O1",
+     "order": 1,
+     "requires": {
+      "power": 11,
+      "lift": 11
+     },
+     "name": "stage 1"
+    },
+    {
+     "id": "O2",
+     "order": 2,
+     "requires": {
+      "grip": 11,
+      "power": 7
+     },
+     "name": "stage 2"
+    },
+    {
+     "id": "O3",
+     "order": 3,
+     "requires": {
+      "power": 11,
+      "grip": 10
+     },
+     "name": "stage 3"
+    },
+    {
+     "id": "O4",
+     "order": 4,
+     "requires": {
+      "power": 2,
+      "grip": 1
+     },
+     "name": "stage 4"
+    }
+   ]
+  },
+  "rules": {
+   "weight_max": 27,
+   "slot_max": 3,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "power",
+    "lift",
+    "grip"
+   ],
+   "obstacle_ordering": "unordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 27.",
+    "Use at most 3 parts.",
+    "Obstacles may be faced in any order."
+   ]
+  }
+ },
+ "ground_truth": {
+  "parts": [
+   {
+    "id": "P1",
+    "name": "tank-71",
+    "weight": 10,
+    "qty_available": 1,
+    "attributes": {
+     "power": 8,
+     "lift": 6,
+     "grip": 5
+    },
+    "cost": 10
+   },
+   {
+    "id": "P2",
+    "name": "wheel-66",
+    "weight": 5,
+    "qty_available": 1,
+    "attributes": {
+     "power": 6,
+     "lift": 4,
+     "grip": 0
+    },
+    "cost": 15
+   },
+   {
+    "id": "P3",
+    "name": "brace-87",
+    "weight": 5,
+    "qty_available": 2,
+    "attributes": {
+     "power": 7,
+     "lift": 7,
+     "grip": 9
+    },
+    "cost": 25
+   },
+   {
+    "id": "P4",
+    "name": "frame-69",
+    "weight": 8,
+    "qty_available": 1,
+    "attributes": {
+     "power": 7,
+     "lift": 4,
+     "grip": 2
+    },
+    "cost": 15
+   },
+   {
+    "id": "P5",
+    "name": "engine-33",
+    "weight": 12,
+    "qty_available": 2,
+    "attributes": {
+     "power": 9,
+     "lift": 0,
+     "grip": 7
+    },
+    "cost": 15
+   },
+   {
+    "id": "P6",
+    "name": "brace-21",
+    "weight": 11,
+    "qty_available": 3,
+    "attributes": {
+     "power": 6,
+     "lift": 8,
+     "grip": 8
+    },
+    "cost": 0
+   }
+  ],
+  "obstacles": [
+   {
+    "id": "O1",
+    "order": 1,
+    "requires": {
+     "power": 11,
+     "lift": 11
+    },
+    "name": "stage 1"
+   },
+   {
+    "id": "O2",
+    "order": 2,
+    "requires": {
+     "grip": 11,
+     "power": 7
+    },
+    "name": "stage 2"
+   },
+   {
+    "id": "O3",
+    "order": 3,
+    "requires": {
+     "power": 11,
+     "grip": 10
+    },
+    "name": "stage 3"
+   },
+   {
+    "id": "O4",
+    "order": 4,
+    "requires": {
+     "power": 2,
+     "grip": 1
+    },
+    "name": "stage 4"
+   }
+  ],
+  "rules": {
+   "weight_max": 27,
+   "slot_max": 3,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "power",
+    "lift",
+    "grip"
+   ],
+   "obstacle_ordering": "unordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 27.",
+    "Use at most 3 parts.",
+    "Obstacles may be faced in any order."
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}

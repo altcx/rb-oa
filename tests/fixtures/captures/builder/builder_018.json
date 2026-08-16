@@ -1,0 +1,336 @@
+{
+ "fixture_id": "builder_018",
+ "puzzle_type": "builder",
+ "image": "builder_018.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "P1",
+   "box": {
+    "x": 40,
+    "y": 70,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P2",
+   "box": {
+    "x": 384,
+    "y": 70,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P3",
+   "box": {
+    "x": 40,
+    "y": 238,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P4",
+   "box": {
+    "x": 384,
+    "y": 238,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P5",
+   "box": {
+    "x": 40,
+    "y": 406,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P6",
+   "box": {
+    "x": 384,
+    "y": 406,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "obstacles",
+   "box": {
+    "x": 740,
+    "y": 70,
+    "w": 340,
+    "h": 228
+   },
+   "target": "builder_obstacles",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "rules",
+   "box": {
+    "x": 740,
+    "y": 322,
+    "w": 340,
+    "h": 260
+   },
+   "target": "builder_instructions",
+   "max_long_edge": 1568
+  }
+ ],
+ "region_truth": {
+  "P1": {
+   "id": "P1",
+   "name": "rotor-38",
+   "weight": 10,
+   "qty_available": 1,
+   "attributes": {
+    "power": 6,
+    "range": 1
+   },
+   "cost": 10
+  },
+  "P2": {
+   "id": "P2",
+   "name": "brace-45",
+   "weight": 2,
+   "qty_available": 1,
+   "attributes": {
+    "power": 0,
+    "range": 4
+   },
+   "cost": 25
+  },
+  "P3": {
+   "id": "P3",
+   "name": "plate-45",
+   "weight": 6,
+   "qty_available": 1,
+   "attributes": {
+    "power": 5,
+    "range": 5
+   },
+   "cost": 5
+  },
+  "P4": {
+   "id": "P4",
+   "name": "rotor-41",
+   "weight": 1,
+   "qty_available": 1,
+   "attributes": {
+    "power": 7,
+    "range": 9
+   },
+   "cost": 10
+  },
+  "P5": {
+   "id": "P5",
+   "name": "boom-73",
+   "weight": 1,
+   "qty_available": 1,
+   "attributes": {
+    "power": 5,
+    "range": 8
+   },
+   "cost": 10
+  },
+  "P6": {
+   "id": "P6",
+   "name": "wheel-89",
+   "weight": 5,
+   "qty_available": 1,
+   "attributes": {
+    "power": 6,
+    "range": 6
+   },
+   "cost": 0
+  },
+  "obstacles": {
+   "obstacles": [
+    {
+     "id": "O1",
+     "order": 1,
+     "requires": {
+      "power": 5,
+      "range": 6
+     },
+     "name": "stage 1"
+    },
+    {
+     "id": "O2",
+     "order": 2,
+     "requires": {
+      "power": 13,
+      "range": 4
+     },
+     "name": "stage 2"
+    },
+    {
+     "id": "O3",
+     "order": 3,
+     "requires": {
+      "power": 14,
+      "range": 11
+     },
+     "name": "stage 3"
+    }
+   ]
+  },
+  "rules": {
+   "weight_max": 35,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "power",
+    "range"
+   ],
+   "obstacle_ordering": null,
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 35."
+   ]
+  }
+ },
+ "ground_truth": {
+  "parts": [
+   {
+    "id": "P1",
+    "name": "rotor-38",
+    "weight": 10,
+    "qty_available": 1,
+    "attributes": {
+     "power": 6,
+     "range": 1
+    },
+    "cost": 10
+   },
+   {
+    "id": "P2",
+    "name": "brace-45",
+    "weight": 2,
+    "qty_available": 1,
+    "attributes": {
+     "power": 0,
+     "range": 4
+    },
+    "cost": 25
+   },
+   {
+    "id": "P3",
+    "name": "plate-45",
+    "weight": 6,
+    "qty_available": 1,
+    "attributes": {
+     "power": 5,
+     "range": 5
+    },
+    "cost": 5
+   },
+   {
+    "id": "P4",
+    "name": "rotor-41",
+    "weight": 1,
+    "qty_available": 1,
+    "attributes": {
+     "power": 7,
+     "range": 9
+    },
+    "cost": 10
+   },
+   {
+    "id": "P5",
+    "name": "boom-73",
+    "weight": 1,
+    "qty_available": 1,
+    "attributes": {
+     "power": 5,
+     "range": 8
+    },
+    "cost": 10
+   },
+   {
+    "id": "P6",
+    "name": "wheel-89",
+    "weight": 5,
+    "qty_available": 1,
+    "attributes": {
+     "power": 6,
+     "range": 6
+    },
+    "cost": 0
+   }
+  ],
+  "obstacles": [
+   {
+    "id": "O1",
+    "order": 1,
+    "requires": {
+     "power": 5,
+     "range": 6
+    },
+    "name": "stage 1"
+   },
+   {
+    "id": "O2",
+    "order": 2,
+    "requires": {
+     "power": 13,
+     "range": 4
+    },
+    "name": "stage 2"
+   },
+   {
+    "id": "O3",
+    "order": 3,
+    "requires": {
+     "power": 14,
+     "range": 11
+    },
+    "name": "stage 3"
+   }
+  ],
+  "rules": {
+   "weight_max": 35,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "power",
+    "range"
+   ],
+   "obstacle_ordering": null,
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 35."
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}

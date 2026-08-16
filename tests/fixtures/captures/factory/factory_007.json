@@ -1,0 +1,424 @@
+{
+ "fixture_id": "factory_007",
+ "puzzle_type": "factory",
+ "image": "factory_007.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "M1",
+   "box": {
+    "x": 40,
+    "y": 110,
+    "w": 340,
+    "h": 250
+   },
+   "target": "factory_machine",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "M2",
+   "box": {
+    "x": 410,
+    "y": 110,
+    "w": 340,
+    "h": 250
+   },
+   "target": "factory_machine",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "M3",
+   "box": {
+    "x": 780,
+    "y": 110,
+    "w": 340,
+    "h": 250
+   },
+   "target": "factory_machine",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "M4",
+   "box": {
+    "x": 40,
+    "y": 400,
+    "w": 340,
+    "h": 250
+   },
+   "target": "factory_machine",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "hud",
+   "box": {
+    "x": 40,
+    "y": 24,
+    "w": 1080,
+    "h": 60
+   },
+   "target": "factory_hud",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "topology",
+   "box": {
+    "x": 0,
+    "y": 0,
+    "w": 1160,
+    "h": 690
+   },
+   "target": "factory_topology",
+   "max_long_edge": 768
+  }
+ ],
+ "region_truth": {
+  "M1": {
+   "id": "M1",
+   "kind": "supplier",
+   "name": "Supplier 1",
+   "recipes": [
+    {
+     "id": "M1-r1",
+     "name": "buy ingot",
+     "inputs": {},
+     "output_item": "ingot",
+     "output_qty": 2,
+     "sale_price": null,
+     "purchase_cost": 12.0,
+     "production_cost": null
+    }
+   ],
+   "selected_recipe_id": "M1-r1",
+   "output_setting": 4,
+   "output_max": 6,
+   "storage_max": 60,
+   "production_hours": 1,
+   "installed_mods": [],
+   "current_storage": null,
+   "x": 210.0,
+   "y": 235.0
+  },
+  "M2": {
+   "id": "M2",
+   "kind": "maker",
+   "name": "Maker 2",
+   "recipes": [
+    {
+     "id": "M2-r1",
+     "name": "ingot->coil",
+     "inputs": {
+      "ingot": 2
+     },
+     "output_item": "coil",
+     "output_qty": 1,
+     "sale_price": null,
+     "purchase_cost": null,
+     "production_cost": 5.0
+    },
+    {
+     "id": "M2-r2",
+     "name": "ingot->coil",
+     "inputs": {
+      "ingot": 2
+     },
+     "output_item": "coil",
+     "output_qty": 2,
+     "sale_price": null,
+     "purchase_cost": null,
+     "production_cost": 7.0
+    }
+   ],
+   "selected_recipe_id": "M2-r1",
+   "output_setting": 1,
+   "output_max": 6,
+   "storage_max": 60,
+   "production_hours": 1,
+   "installed_mods": [],
+   "current_storage": null,
+   "x": 580.0,
+   "y": 235.0
+  },
+  "M3": {
+   "id": "M3",
+   "kind": "maker",
+   "name": "Maker 3",
+   "recipes": [
+    {
+     "id": "M3-r1",
+     "name": "coil->panel",
+     "inputs": {
+      "coil": 2
+     },
+     "output_item": "panel",
+     "output_qty": 1,
+     "sale_price": null,
+     "purchase_cost": null,
+     "production_cost": 8.0
+    },
+    {
+     "id": "M3-r2",
+     "name": "coil->panel",
+     "inputs": {
+      "coil": 1
+     },
+     "output_item": "panel",
+     "output_qty": 1,
+     "sale_price": null,
+     "purchase_cost": null,
+     "production_cost": 1.0
+    }
+   ],
+   "selected_recipe_id": "M3-r1",
+   "output_setting": 0,
+   "output_max": 2,
+   "storage_max": 20,
+   "production_hours": 1,
+   "installed_mods": [
+    "double_output_max"
+   ],
+   "current_storage": null,
+   "x": 950.0,
+   "y": 235.0
+  },
+  "M4": {
+   "id": "M4",
+   "kind": "seller",
+   "name": "Seller 4",
+   "recipes": [
+    {
+     "id": "M4-r1",
+     "name": "sell panel",
+     "inputs": {
+      "panel": 1
+     },
+     "output_item": null,
+     "output_qty": 1,
+     "sale_price": 82.0,
+     "purchase_cost": null,
+     "production_cost": null
+    },
+    {
+     "id": "M4-r2",
+     "name": "sell panel",
+     "inputs": {
+      "panel": 1
+     },
+     "output_item": null,
+     "output_qty": 1,
+     "sale_price": 81.0,
+     "purchase_cost": null,
+     "production_cost": null
+    }
+   ],
+   "selected_recipe_id": "M4-r1",
+   "output_setting": 0,
+   "output_max": 4,
+   "storage_max": 0,
+   "production_hours": 1,
+   "installed_mods": [],
+   "current_storage": null,
+   "x": 210.0,
+   "y": 525.0
+  },
+  "hud": {
+   "money": 4675.0,
+   "horizon_hours": 18,
+   "hour_now": 15
+  },
+  "topology": {
+   "edges": [
+    {
+     "src": "M1",
+     "dst": "M2"
+    },
+    {
+     "src": "M2",
+     "dst": "M3"
+    },
+    {
+     "src": "M3",
+     "dst": "M4"
+    }
+   ]
+  }
+ },
+ "ground_truth": {
+  "hud": {
+   "money": 4675.0,
+   "horizon_hours": 18,
+   "hour_now": 15
+  },
+  "machines": [
+   {
+    "id": "M1",
+    "kind": "supplier",
+    "name": "Supplier 1",
+    "recipes": [
+     {
+      "id": "M1-r1",
+      "name": "buy ingot",
+      "inputs": {},
+      "output_item": "ingot",
+      "output_qty": 2,
+      "sale_price": null,
+      "purchase_cost": 12.0,
+      "production_cost": null
+     }
+    ],
+    "selected_recipe_id": "M1-r1",
+    "output_setting": 4,
+    "output_max": 6,
+    "storage_max": 60,
+    "production_hours": 1,
+    "installed_mods": [],
+    "current_storage": null,
+    "x": 210.0,
+    "y": 235.0
+   },
+   {
+    "id": "M2",
+    "kind": "maker",
+    "name": "Maker 2",
+    "recipes": [
+     {
+      "id": "M2-r1",
+      "name": "ingot->coil",
+      "inputs": {
+       "ingot": 2
+      },
+      "output_item": "coil",
+      "output_qty": 1,
+      "sale_price": null,
+      "purchase_cost": null,
+      "production_cost": 5.0
+     },
+     {
+      "id": "M2-r2",
+      "name": "ingot->coil",
+      "inputs": {
+       "ingot": 2
+      },
+      "output_item": "coil",
+      "output_qty": 2,
+      "sale_price": null,
+      "purchase_cost": null,
+      "production_cost": 7.0
+     }
+    ],
+    "selected_recipe_id": "M2-r1",
+    "output_setting": 1,
+    "output_max": 6,
+    "storage_max": 60,
+    "production_hours": 1,
+    "installed_mods": [],
+    "current_storage": null,
+    "x": 580.0,
+    "y": 235.0
+   },
+   {
+    "id": "M3",
+    "kind": "maker",
+    "name": "Maker 3",
+    "recipes": [
+     {
+      "id": "M3-r1",
+      "name": "coil->panel",
+      "inputs": {
+       "coil": 2
+      },
+      "output_item": "panel",
+      "output_qty": 1,
+      "sale_price": null,
+      "purchase_cost": null,
+      "production_cost": 8.0
+     },
+     {
+      "id": "M3-r2",
+      "name": "coil->panel",
+      "inputs": {
+       "coil": 1
+      },
+      "output_item": "panel",
+      "output_qty": 1,
+      "sale_price": null,
+      "purchase_cost": null,
+      "production_cost": 1.0
+     }
+    ],
+    "selected_recipe_id": "M3-r1",
+    "output_setting": 0,
+    "output_max": 2,
+    "storage_max": 20,
+    "production_hours": 1,
+    "installed_mods": [
+     "double_output_max"
+    ],
+    "current_storage": null,
+    "x": 950.0,
+    "y": 235.0
+   },
+   {
+    "id": "M4",
+    "kind": "seller",
+    "name": "Seller 4",
+    "recipes": [
+     {
+      "id": "M4-r1",
+      "name": "sell panel",
+      "inputs": {
+       "panel": 1
+      },
+      "output_item": null,
+      "output_qty": 1,
+      "sale_price": 82.0,
+      "purchase_cost": null,
+      "production_cost": null
+     },
+     {
+      "id": "M4-r2",
+      "name": "sell panel",
+      "inputs": {
+       "panel": 1
+      },
+      "output_item": null,
+      "output_qty": 1,
+      "sale_price": 81.0,
+      "purchase_cost": null,
+      "production_cost": null
+     }
+    ],
+    "selected_recipe_id": "M4-r1",
+    "output_setting": 0,
+    "output_max": 4,
+    "storage_max": 0,
+    "production_hours": 1,
+    "installed_mods": [],
+    "current_storage": null,
+    "x": 210.0,
+    "y": 525.0
+   }
+  ],
+  "topology": {
+   "edges": [
+    {
+     "src": "M1",
+     "dst": "M2"
+    },
+    {
+     "src": "M2",
+     "dst": "M3"
+    },
+    {
+     "src": "M3",
+     "dst": "M4"
+    }
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}

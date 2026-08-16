@@ -1,0 +1,370 @@
+{
+ "fixture_id": "builder_021",
+ "puzzle_type": "builder",
+ "image": "builder_021.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "P1",
+   "box": {
+    "x": 40,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P2",
+   "box": {
+    "x": 384,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P3",
+   "box": {
+    "x": 40,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P4",
+   "box": {
+    "x": 384,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P5",
+   "box": {
+    "x": 40,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P6",
+   "box": {
+    "x": 384,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "obstacles",
+   "box": {
+    "x": 740,
+    "y": 70,
+    "w": 340,
+    "h": 284
+   },
+   "target": "builder_obstacles",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "rules",
+   "box": {
+    "x": 740,
+    "y": 378,
+    "w": 340,
+    "h": 260
+   },
+   "target": "builder_instructions",
+   "max_long_edge": 1568
+  }
+ ],
+ "region_truth": {
+  "P1": {
+   "id": "P1",
+   "name": "engine-98",
+   "weight": 9,
+   "qty_available": 3,
+   "attributes": {
+    "lift": 9,
+    "grip": 4,
+    "range": 1
+   },
+   "cost": 25
+  },
+  "P2": {
+   "id": "P2",
+   "name": "wheel-75",
+   "weight": 3,
+   "qty_available": 1,
+   "attributes": {
+    "lift": 0,
+    "grip": 2,
+    "range": 0
+   },
+   "cost": 10
+  },
+  "P3": {
+   "id": "P3",
+   "name": "hook-50",
+   "weight": 2,
+   "qty_available": 1,
+   "attributes": {
+    "lift": 5,
+    "grip": 2,
+    "range": 5
+   },
+   "cost": 25
+  },
+  "P4": {
+   "id": "P4",
+   "name": "brace-56",
+   "weight": 9,
+   "qty_available": 3,
+   "attributes": {
+    "lift": 4,
+    "grip": 7,
+    "range": 0
+   },
+   "cost": 25
+  },
+  "P5": {
+   "id": "P5",
+   "name": "rotor-31",
+   "weight": 12,
+   "qty_available": 1,
+   "attributes": {
+    "lift": 7,
+    "grip": 3,
+    "range": 8
+   },
+   "cost": 0
+  },
+  "P6": {
+   "id": "P6",
+   "name": "boom-45",
+   "weight": 2,
+   "qty_available": 1,
+   "attributes": {
+    "lift": 2,
+    "grip": 6,
+    "range": 1
+   },
+   "cost": 15
+  },
+  "obstacles": {
+   "obstacles": [
+    {
+     "id": "O1",
+     "order": 1,
+     "requires": {
+      "range": 9,
+      "lift": 2
+     },
+     "name": "stage 1"
+    },
+    {
+     "id": "O2",
+     "order": 2,
+     "requires": {
+      "grip": 9,
+      "range": 13
+     },
+     "name": "stage 2"
+    },
+    {
+     "id": "O3",
+     "order": 3,
+     "requires": {
+      "lift": 2,
+      "range": 3
+     },
+     "name": "stage 3"
+    },
+    {
+     "id": "O4",
+     "order": 4,
+     "requires": {
+      "lift": 2,
+      "range": 8
+     },
+     "name": "stage 4"
+    }
+   ]
+  },
+  "rules": {
+   "weight_max": 18,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "lift",
+    "grip",
+    "range"
+   ],
+   "obstacle_ordering": "unordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 18.",
+    "Obstacles may be faced in any order."
+   ]
+  }
+ },
+ "ground_truth": {
+  "parts": [
+   {
+    "id": "P1",
+    "name": "engine-98",
+    "weight": 9,
+    "qty_available": 3,
+    "attributes": {
+     "lift": 9,
+     "grip": 4,
+     "range": 1
+    },
+    "cost": 25
+   },
+   {
+    "id": "P2",
+    "name": "wheel-75",
+    "weight": 3,
+    "qty_available": 1,
+    "attributes": {
+     "lift": 0,
+     "grip": 2,
+     "range": 0
+    },
+    "cost": 10
+   },
+   {
+    "id": "P3",
+    "name": "hook-50",
+    "weight": 2,
+    "qty_available": 1,
+    "attributes": {
+     "lift": 5,
+     "grip": 2,
+     "range": 5
+    },
+    "cost": 25
+   },
+   {
+    "id": "P4",
+    "name": "brace-56",
+    "weight": 9,
+    "qty_available": 3,
+    "attributes": {
+     "lift": 4,
+     "grip": 7,
+     "range": 0
+    },
+    "cost": 25
+   },
+   {
+    "id": "P5",
+    "name": "rotor-31",
+    "weight": 12,
+    "qty_available": 1,
+    "attributes": {
+     "lift": 7,
+     "grip": 3,
+     "range": 8
+    },
+    "cost": 0
+   },
+   {
+    "id": "P6",
+    "name": "boom-45",
+    "weight": 2,
+    "qty_available": 1,
+    "attributes": {
+     "lift": 2,
+     "grip": 6,
+     "range": 1
+    },
+    "cost": 15
+   }
+  ],
+  "obstacles": [
+   {
+    "id": "O1",
+    "order": 1,
+    "requires": {
+     "range": 9,
+     "lift": 2
+    },
+    "name": "stage 1"
+   },
+   {
+    "id": "O2",
+    "order": 2,
+    "requires": {
+     "grip": 9,
+     "range": 13
+    },
+    "name": "stage 2"
+   },
+   {
+    "id": "O3",
+    "order": 3,
+    "requires": {
+     "lift": 2,
+     "range": 3
+    },
+    "name": "stage 3"
+   },
+   {
+    "id": "O4",
+    "order": 4,
+    "requires": {
+     "lift": 2,
+     "range": 8
+    },
+    "name": "stage 4"
+   }
+  ],
+  "rules": {
+   "weight_max": 18,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": null,
+   "attribute_names": [
+    "lift",
+    "grip",
+    "range"
+   ],
+   "obstacle_ordering": "unordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 18.",
+    "Obstacles may be faced in any order."
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}

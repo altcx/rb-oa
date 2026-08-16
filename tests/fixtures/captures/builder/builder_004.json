@@ -1,0 +1,358 @@
+{
+ "fixture_id": "builder_004",
+ "puzzle_type": "builder",
+ "image": "builder_004.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "P1",
+   "box": {
+    "x": 40,
+    "y": 70,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P2",
+   "box": {
+    "x": 384,
+    "y": 70,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P3",
+   "box": {
+    "x": 40,
+    "y": 238,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P4",
+   "box": {
+    "x": 384,
+    "y": 238,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P5",
+   "box": {
+    "x": 40,
+    "y": 406,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P6",
+   "box": {
+    "x": 384,
+    "y": 406,
+    "w": 320,
+    "h": 148
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "obstacles",
+   "box": {
+    "x": 740,
+    "y": 70,
+    "w": 340,
+    "h": 284
+   },
+   "target": "builder_obstacles",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "rules",
+   "box": {
+    "x": 740,
+    "y": 378,
+    "w": 340,
+    "h": 260
+   },
+   "target": "builder_instructions",
+   "max_long_edge": 1568
+  }
+ ],
+ "region_truth": {
+  "P1": {
+   "id": "P1",
+   "name": "frame-53",
+   "weight": 8,
+   "qty_available": 3,
+   "attributes": {
+    "speed": 0,
+    "armor": 5
+   },
+   "cost": 0
+  },
+  "P2": {
+   "id": "P2",
+   "name": "hook-25",
+   "weight": 3,
+   "qty_available": 1,
+   "attributes": {
+    "speed": 4,
+    "armor": 1
+   },
+   "cost": 0
+  },
+  "P3": {
+   "id": "P3",
+   "name": "engine-50",
+   "weight": 5,
+   "qty_available": 2,
+   "attributes": {
+    "speed": 7,
+    "armor": 7
+   },
+   "cost": 5
+  },
+  "P4": {
+   "id": "P4",
+   "name": "tank-80",
+   "weight": 8,
+   "qty_available": 1,
+   "attributes": {
+    "speed": 9,
+    "armor": 8
+   },
+   "cost": 0
+  },
+  "P5": {
+   "id": "P5",
+   "name": "plate-85",
+   "weight": 12,
+   "qty_available": 3,
+   "attributes": {
+    "speed": 9,
+    "armor": 8
+   },
+   "cost": 15
+  },
+  "P6": {
+   "id": "P6",
+   "name": "engine-33",
+   "weight": 10,
+   "qty_available": 1,
+   "attributes": {
+    "speed": 1,
+    "armor": 6
+   },
+   "cost": 15
+  },
+  "obstacles": {
+   "obstacles": [
+    {
+     "id": "O1",
+     "order": 1,
+     "requires": {
+      "armor": 2,
+      "speed": 1
+     },
+     "name": "stage 1"
+    },
+    {
+     "id": "O2",
+     "order": 2,
+     "requires": {
+      "armor": 11,
+      "speed": 14
+     },
+     "name": "stage 2"
+    },
+    {
+     "id": "O3",
+     "order": 3,
+     "requires": {
+      "speed": 14,
+      "armor": 7
+     },
+     "name": "stage 3"
+    },
+    {
+     "id": "O4",
+     "order": 4,
+     "requires": {
+      "speed": 12,
+      "armor": 5
+     },
+     "name": "stage 4"
+    }
+   ]
+  },
+  "rules": {
+   "weight_max": 39,
+   "slot_max": 4,
+   "money_max": null,
+   "duplicates_allowed": true,
+   "attribute_names": [
+    "speed",
+    "armor"
+   ],
+   "obstacle_ordering": null,
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 39.",
+    "Use at most 4 parts.",
+    "A part may be used more than once."
+   ]
+  }
+ },
+ "ground_truth": {
+  "parts": [
+   {
+    "id": "P1",
+    "name": "frame-53",
+    "weight": 8,
+    "qty_available": 3,
+    "attributes": {
+     "speed": 0,
+     "armor": 5
+    },
+    "cost": 0
+   },
+   {
+    "id": "P2",
+    "name": "hook-25",
+    "weight": 3,
+    "qty_available": 1,
+    "attributes": {
+     "speed": 4,
+     "armor": 1
+    },
+    "cost": 0
+   },
+   {
+    "id": "P3",
+    "name": "engine-50",
+    "weight": 5,
+    "qty_available": 2,
+    "attributes": {
+     "speed": 7,
+     "armor": 7
+    },
+    "cost": 5
+   },
+   {
+    "id": "P4",
+    "name": "tank-80",
+    "weight": 8,
+    "qty_available": 1,
+    "attributes": {
+     "speed": 9,
+     "armor": 8
+    },
+    "cost": 0
+   },
+   {
+    "id": "P5",
+    "name": "plate-85",
+    "weight": 12,
+    "qty_available": 3,
+    "attributes": {
+     "speed": 9,
+     "armor": 8
+    },
+    "cost": 15
+   },
+   {
+    "id": "P6",
+    "name": "engine-33",
+    "weight": 10,
+    "qty_available": 1,
+    "attributes": {
+     "speed": 1,
+     "armor": 6
+    },
+    "cost": 15
+   }
+  ],
+  "obstacles": [
+   {
+    "id": "O1",
+    "order": 1,
+    "requires": {
+     "armor": 2,
+     "speed": 1
+    },
+    "name": "stage 1"
+   },
+   {
+    "id": "O2",
+    "order": 2,
+    "requires": {
+     "armor": 11,
+     "speed": 14
+    },
+    "name": "stage 2"
+   },
+   {
+    "id": "O3",
+    "order": 3,
+    "requires": {
+     "speed": 14,
+     "armor": 7
+    },
+    "name": "stage 3"
+   },
+   {
+    "id": "O4",
+    "order": 4,
+    "requires": {
+     "speed": 12,
+     "armor": 5
+    },
+    "name": "stage 4"
+   }
+  ],
+  "rules": {
+   "weight_max": 39,
+   "slot_max": 4,
+   "money_max": null,
+   "duplicates_allowed": true,
+   "attribute_names": [
+    "speed",
+    "armor"
+   ],
+   "obstacle_ordering": null,
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 39.",
+    "Use at most 4 parts.",
+    "A part may be used more than once."
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}

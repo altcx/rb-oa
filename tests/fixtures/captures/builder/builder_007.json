@@ -1,0 +1,372 @@
+{
+ "fixture_id": "builder_007",
+ "puzzle_type": "builder",
+ "image": "builder_007.png",
+ "scale": 1.0,
+ "source": "synthetic",
+ "verified": true,
+ "regions": [
+  {
+   "name": "P1",
+   "box": {
+    "x": 40,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P2",
+   "box": {
+    "x": 384,
+    "y": 70,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P3",
+   "box": {
+    "x": 40,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P4",
+   "box": {
+    "x": 384,
+    "y": 256,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P5",
+   "box": {
+    "x": 40,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "P6",
+   "box": {
+    "x": 384,
+    "y": 442,
+    "w": 320,
+    "h": 166
+   },
+   "target": "builder_part",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "obstacles",
+   "box": {
+    "x": 740,
+    "y": 70,
+    "w": 340,
+    "h": 284
+   },
+   "target": "builder_obstacles",
+   "max_long_edge": 1568
+  },
+  {
+   "name": "rules",
+   "box": {
+    "x": 740,
+    "y": 378,
+    "w": 340,
+    "h": 260
+   },
+   "target": "builder_instructions",
+   "max_long_edge": 1568
+  }
+ ],
+ "region_truth": {
+  "P1": {
+   "id": "P1",
+   "name": "plate-49",
+   "weight": 2,
+   "qty_available": 1,
+   "attributes": {
+    "power": 6,
+    "speed": 3,
+    "lift": 6
+   },
+   "cost": 5
+  },
+  "P2": {
+   "id": "P2",
+   "name": "engine-90",
+   "weight": 1,
+   "qty_available": 1,
+   "attributes": {
+    "power": 7,
+    "speed": 6,
+    "lift": 0
+   },
+   "cost": 5
+  },
+  "P3": {
+   "id": "P3",
+   "name": "hook-72",
+   "weight": 9,
+   "qty_available": 2,
+   "attributes": {
+    "power": 9,
+    "speed": 3,
+    "lift": 1
+   },
+   "cost": 25
+  },
+  "P4": {
+   "id": "P4",
+   "name": "frame-64",
+   "weight": 2,
+   "qty_available": 1,
+   "attributes": {
+    "power": 9,
+    "speed": 7,
+    "lift": 8
+   },
+   "cost": 0
+  },
+  "P5": {
+   "id": "P5",
+   "name": "boom-94",
+   "weight": 9,
+   "qty_available": 3,
+   "attributes": {
+    "power": 4,
+    "speed": 6,
+    "lift": 9
+   },
+   "cost": 25
+  },
+  "P6": {
+   "id": "P6",
+   "name": "wheel-98",
+   "weight": 7,
+   "qty_available": 3,
+   "attributes": {
+    "power": 3,
+    "speed": 9,
+    "lift": 8
+   },
+   "cost": 10
+  },
+  "obstacles": {
+   "obstacles": [
+    {
+     "id": "O1",
+     "order": 1,
+     "requires": {
+      "speed": 3,
+      "power": 12
+     },
+     "name": "stage 1"
+    },
+    {
+     "id": "O2",
+     "order": 2,
+     "requires": {
+      "speed": 14,
+      "power": 5
+     },
+     "name": "stage 2"
+    },
+    {
+     "id": "O3",
+     "order": 3,
+     "requires": {
+      "speed": 9,
+      "power": 14
+     },
+     "name": "stage 3"
+    },
+    {
+     "id": "O4",
+     "order": 4,
+     "requires": {
+      "lift": 9,
+      "power": 13
+     },
+     "name": "stage 4"
+    }
+   ]
+  },
+  "rules": {
+   "weight_max": 19,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": true,
+   "attribute_names": [
+    "power",
+    "speed",
+    "lift"
+   ],
+   "obstacle_ordering": "ordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 19.",
+    "A part may be used more than once.",
+    "Obstacles are faced in the order listed."
+   ]
+  }
+ },
+ "ground_truth": {
+  "parts": [
+   {
+    "id": "P1",
+    "name": "plate-49",
+    "weight": 2,
+    "qty_available": 1,
+    "attributes": {
+     "power": 6,
+     "speed": 3,
+     "lift": 6
+    },
+    "cost": 5
+   },
+   {
+    "id": "P2",
+    "name": "engine-90",
+    "weight": 1,
+    "qty_available": 1,
+    "attributes": {
+     "power": 7,
+     "speed": 6,
+     "lift": 0
+    },
+    "cost": 5
+   },
+   {
+    "id": "P3",
+    "name": "hook-72",
+    "weight": 9,
+    "qty_available": 2,
+    "attributes": {
+     "power": 9,
+     "speed": 3,
+     "lift": 1
+    },
+    "cost": 25
+   },
+   {
+    "id": "P4",
+    "name": "frame-64",
+    "weight": 2,
+    "qty_available": 1,
+    "attributes": {
+     "power": 9,
+     "speed": 7,
+     "lift": 8
+    },
+    "cost": 0
+   },
+   {
+    "id": "P5",
+    "name": "boom-94",
+    "weight": 9,
+    "qty_available": 3,
+    "attributes": {
+     "power": 4,
+     "speed": 6,
+     "lift": 9
+    },
+    "cost": 25
+   },
+   {
+    "id": "P6",
+    "name": "wheel-98",
+    "weight": 7,
+    "qty_available": 3,
+    "attributes": {
+     "power": 3,
+     "speed": 9,
+     "lift": 8
+    },
+    "cost": 10
+   }
+  ],
+  "obstacles": [
+   {
+    "id": "O1",
+    "order": 1,
+    "requires": {
+     "speed": 3,
+     "power": 12
+    },
+    "name": "stage 1"
+   },
+   {
+    "id": "O2",
+    "order": 2,
+    "requires": {
+     "speed": 14,
+     "power": 5
+    },
+    "name": "stage 2"
+   },
+   {
+    "id": "O3",
+    "order": 3,
+    "requires": {
+     "speed": 9,
+     "power": 14
+    },
+    "name": "stage 3"
+   },
+   {
+    "id": "O4",
+    "order": 4,
+    "requires": {
+     "lift": 9,
+     "power": 13
+    },
+    "name": "stage 4"
+   }
+  ],
+  "rules": {
+   "weight_max": 19,
+   "slot_max": null,
+   "money_max": null,
+   "duplicates_allowed": true,
+   "attribute_names": [
+    "power",
+    "speed",
+    "lift"
+   ],
+   "obstacle_ordering": "ordered",
+   "obstacle_semantics": null,
+   "aggregation": null,
+   "failure_mode": null,
+   "objective": "count_valid",
+   "quoted_rule_text": [
+    "Total weight may not exceed 19.",
+    "A part may be used more than once.",
+    "Obstacles are faced in the order listed."
+   ]
+  }
+ },
+ "notes": {
+  "generator": "tests/fixtures/generate_fixtures.py",
+  "verified": "ground truth is the render input, so it is exact by construction"
+ }
+}
