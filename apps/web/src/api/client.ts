@@ -4,7 +4,10 @@ import type {
   CaptureMonitorRequest,
   CaptureRegionRequest,
   CapturesResponse,
+  ChartResponse,
   ConfirmRequest,
+  ExtractRequest,
+  ExtractResponse,
   CreateSessionRequest,
   CreateSessionResponse,
   JobResponse,
@@ -131,6 +134,18 @@ export const api = {
     return isMockMode()
       ? mock.ok()
       : post(`/api/sessions/${encodeURIComponent(sessionId)}/state/confirm`, body);
+  },
+
+  /** The three money lines + the LP ceiling. Absent lines come back null. */
+  getChart(sessionId: string): Promise<ChartResponse> {
+    return isMockMode()
+      ? mock.getChart()
+      : get(`/api/sessions/${encodeURIComponent(sessionId)}/chart`);
+  },
+
+  /** Re-run extraction over specific captures (recovery + deliberate re-read). */
+  extract(body: ExtractRequest): Promise<ExtractResponse> {
+    return isMockMode() ? mock.extract(body) : post('/api/extract', body);
   },
 
   getRules(sessionId: string): Promise<RulesResponse> {

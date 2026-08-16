@@ -1,10 +1,13 @@
 import type { Capture, ClientEvent, ServerEvent } from '../api/types';
 import { onMockCapture } from './bus';
+import { markMockCalibrated } from './mockApi';
 import {
   MOCK_LP_BOUND,
+  mockCalibrationResult,
   mockCaptureImage,
   mockIncomingCapture,
   mockOptimizerCurve,
+  mockProvenanceNumbers,
   mockState,
 } from './fixtures';
 
@@ -51,11 +54,14 @@ function optimizerSteps(): ScriptStep[] {
   const bests = [11_902.55, 12_480.75, 12_744.1, 13_002.4, 13_118.9, 13_140.25, 13_140.25, 13_204.6];
   for (let i = 0; i < bests.length; i++) {
     const best = bests[i] as number;
+    const isLast = i === bests.length - 1;
     steps.push({
       after: 620,
       event: {
         type: 'optimizer_progress',
         job_id: 'opt_mock_1',
+        // Only the terminal event is the answer; the rest are streaming ticks.
+        final: isLast,
         best_value: best,
         bound: MOCK_LP_BOUND,
         iterations: 1_240 + i * 3_115,
@@ -107,7 +113,18 @@ const SCRIPT: ScriptStep[] = [
   { after: 260, event: { type: 'extraction_progress', stage: 'jury: claude-sonnet-4.5', ms: 1180 } },
   { after: 300, event: { type: 'extraction_progress', stage: 'jury: gpt-5-mini', ms: 1640 } },
   { after: 280, event: { type: 'extraction_progress', stage: 'jury: gemini-2.5-flash', ms: 2310 } },
-  { after: 240, event: { type: 'extraction_progress', stage: 'reconcile votes', ms: 3420 } },
+  // The terminal stage carries the tally, so "37 of 40 fields agreed" shows
+  // before the operator opens the inspector.
+  {
+    after: 240,
+    event: {
+      type: 'extraction_progress',
+      stage: 'speculative_done',
+      ms: 3420,
+      disputed: 3,
+      auto_confirmed: 37,
+    },
+  },
   {
     after: 200,
     event: {
@@ -179,12 +196,28 @@ const SCRIPT: ScriptStep[] = [
   },
   ...tokenSteps(AGENT_CLOSING),
   { after: 200, event: { type: 'agent_done', message: 'Plan ready — 3 actions, 1 blocking unknown.' } },
+  // The guard runs after the answer completes, so the alarm attaches to the
+  // assistant message that stated the unsupported figures.
+  {
+    after: 260,
+    event: {
+      type: 'provenance_warning',
+      numbers: mockProvenanceNumbers,
+      text: 'these numbers do not appear in any tool result from this conversation',
+    },
+  },
   {
     after: 300,
     event: {
       type: 'warning',
       text: 'contracts[1].penalty_per_late_unit is still split 3 ways; the plan below assumes $12.50.',
     },
+  },
+  // Calibration lands before the optimizer: it is the gate, and the observed
+  // line does not exist until it passes.
+  {
+    after: 400,
+    event: { type: 'calibration', result: mockCalibrationResult },
   },
   ...optimizerSteps(),
 ];
@@ -251,7 +284,12 @@ export class FakeSocket implements SocketLike {
       t += step.after;
       this.timers.push(
         setTimeout(() => {
-          if (!this.closed) this.onEvent(step.event);
+          if (this.closed) return;
+          // Keep the mock REST layer consistent with the replay: once
+          // calibration lands, GET /chart starts returning the observed line
+          // instead of null, exactly as the backend would.
+          if (step.event.type === 'calibration') markMockCalibrated();
+          this.onEvent(step.event);
         }, t),
       );
     }

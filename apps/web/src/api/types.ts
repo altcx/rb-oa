@@ -102,6 +102,49 @@ export interface Verdict {
   crop: Crop;
 }
 
+/**
+ * A money-over-time curve as the backend emits it: a plain array of dollars
+ * with length `horizon_hours + 1`.
+ *
+ * **Index 0 is hour 0** — the money on hand *before* hour 1 runs — and index h
+ * is the money at the end of hour h. Plotting index 0 as hour 1 shifts every
+ * line by an hour and misreports when the first sale lands, which is the exact
+ * thing this chart exists to show. Use `hourlyToPoints` in `lib/money.ts`.
+ */
+export type MoneyByHour = number[];
+
+/** POST /api/extract */
+export type PuzzleType = 'factory' | 'builder';
+export interface ExtractRequest {
+  session_id: string;
+  capture_ids: string[];
+  puzzle_type?: PuzzleType;
+}
+export interface ExtractResponse {
+  ok: boolean;
+  /** Field paths the jury disagreed on. */
+  disputed: string[];
+  /** How many fields were settled without asking the operator. */
+  auto_confirmed: number;
+  unresolved: string[];
+  elapsed_ms: number;
+  /** True when this was a fast delta re-read rather than a full extraction. */
+  used_delta: boolean;
+}
+
+/**
+ * GET /api/sessions/{id}/chart — the three money lines and the LP ceiling.
+ * A line the session does not have is `null`, never zeros: a flat zero line
+ * reads as a real and catastrophic run.
+ */
+export interface ChartResponse {
+  current: MoneyByHour | null;
+  best: MoneyByHour | null;
+  observed: MoneyByHour | null;
+  bound: number | null;
+  horizon_hours: number | null;
+}
+
 /** GET /api/sessions/{id}/state */
 export interface StatePayload {
   state: JsonValue;
@@ -253,6 +296,10 @@ export interface ExtractionProgressEvent {
   type: 'extraction_progress';
   stage: string;
   ms: number;
+  /** Counts, present on the terminal stage: how many fields the jury split on. */
+  disputed?: number;
+  /** How many fields were settled without the operator. */
+  auto_confirmed?: number;
 }
 export interface StateEvent extends StatePayload {
   type: 'state';
@@ -281,16 +328,41 @@ export interface AgentDoneEvent {
 export interface OptimizerProgressEvent {
   type: 'optimizer_progress';
   job_id: string;
+  /** True on the terminal event: this is the answer, not another tick. */
+  final: boolean;
   best_value: number;
   bound: number;
   iterations: number;
   elapsed_s: number;
-  money_by_hour: MoneyPoint[];
+  /** Streaming curve; null until the worker has one. Index 0 = hour 0. */
+  money_by_hour: MoneyByHour | null;
   actions: OptimizerAction[];
   top_warning: string | null;
 }
 export interface WarningEvent {
   type: 'warning';
+  text: string;
+}
+
+/** Emitted after a calibration run; the observed line only exists after this. */
+export interface CalibrationResult {
+  matched?: boolean;
+  resolved_flags?: JsonObject;
+  [key: string]: JsonValue | undefined;
+}
+export interface CalibrationEvent {
+  type: 'calibration';
+  result: CalibrationResult;
+}
+
+/**
+ * The agent stated a number that appears in no tool result from this
+ * conversation. A correctness alarm, not a toast.
+ */
+export interface ProvenanceWarningEvent {
+  type: 'provenance_warning';
+  /** Numeric tokens exactly as they appeared in the message text. */
+  numbers: string[];
   text: string;
 }
 
@@ -303,7 +375,9 @@ export type ServerEvent =
   | AgentToolResultEvent
   | AgentDoneEvent
   | OptimizerProgressEvent
-  | WarningEvent;
+  | WarningEvent
+  | CalibrationEvent
+  | ProvenanceWarningEvent;
 
 export type ServerEventType = ServerEvent['type'];
 

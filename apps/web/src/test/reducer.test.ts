@@ -53,6 +53,24 @@ describe('socket reducer — one branch per contract event type', () => {
     expect(s.extractionLog).toHaveLength(2);
   });
 
+  it('extraction_progress: carries the field tally when the terminal stage has it', () => {
+    const s = applyServerEvent(initialAppState, {
+      type: 'extraction_progress',
+      stage: 'speculative_done',
+      ms: 3420,
+      disputed: 19,
+      auto_confirmed: 86,
+    });
+    expect(s.extraction).toEqual({
+      stage: 'speculative_done',
+      ms: 3420,
+      disputed: 19,
+      auto_confirmed: 86,
+    });
+    // 86 of 105 fields agreed, without opening the inspector.
+    expect(s.extraction!.auto_confirmed! + s.extraction!.disputed!).toBe(105);
+  });
+
   it('state: installs the payload and clears prior local confirmations', () => {
     const seeded: AppState = { ...initialAppState, accepted: { 'a.b': 1 } };
     const s = applyServerEvent(seeded, {
@@ -140,7 +158,8 @@ describe('socket reducer — one branch per contract event type', () => {
     const base = {
       type: 'optimizer_progress' as const,
       job_id: 'opt_1',
-      money_by_hour: [{ hour: 0, value: 10 }],
+      final: false,
+      money_by_hour: [4820.5, 5900.25],
       actions: [],
       top_warning: null,
     };
@@ -150,8 +169,95 @@ describe('socket reducer — one branch per contract event type', () => {
       { ...base, best_value: 120, bound: 140, iterations: 25, elapsed_s: 2.5 },
     );
     expect(s.optimizer?.best_value).toBe(120);
+    expect(s.optimizer?.final).toBe(false);
     expect(s.optimizerHistory).toHaveLength(2);
     expect(s.optimizerHistory[0]?.best_value).toBe(100);
+  });
+
+  it('optimizer_progress: a final event marks the answer, and null curves survive', () => {
+    const s = feed(
+      initialAppState,
+      {
+        type: 'optimizer_progress',
+        job_id: 'opt_1',
+        final: false,
+        best_value: 100,
+        bound: 140,
+        iterations: 10,
+        elapsed_s: 1,
+        money_by_hour: null,
+        actions: [],
+        top_warning: null,
+      },
+      {
+        type: 'optimizer_progress',
+        job_id: 'opt_1',
+        final: true,
+        best_value: 138,
+        bound: 140,
+        iterations: 90,
+        elapsed_s: 9,
+        money_by_hour: [4820.5, 6000],
+        actions: [],
+        top_warning: null,
+      },
+    );
+    expect(s.optimizer?.final).toBe(true);
+    expect(s.optimizer?.best_value).toBe(138);
+    expect(s.optimizerHistory).toHaveLength(2);
+  });
+
+  it('calibration: stores the result that unlocks the observed line', () => {
+    const s = applyServerEvent(initialAppState, {
+      type: 'calibration',
+      result: { matched: true, resolved_flags: { 'power.brownout': 'scales' } },
+    });
+    expect(s.calibration?.matched).toBe(true);
+  });
+
+  it('provenance_warning: attaches to the offending assistant message', () => {
+    const s = feed(
+      initialAppState,
+      { type: 'agent_token', text: 'It pays $186.00 an hour.' },
+      { type: 'agent_done', message: 'done' },
+      {
+        type: 'provenance_warning',
+        numbers: ['$186.00'],
+        text: 'these numbers do not appear in any tool result from this conversation',
+      },
+    );
+    const agent = s.chat.find((c) => c.kind === 'agent');
+    expect(agent?.kind).toBe('agent');
+    if (agent?.kind === 'agent') {
+      expect(agent.provenance).toHaveLength(1);
+      expect(agent.provenance[0]?.numbers).toEqual(['$186.00']);
+    }
+    // It is attached, not appended as a separate floating item.
+    expect(s.chat.some((c) => c.kind === 'provenance')).toBe(false);
+  });
+
+  it('provenance_warning: targets the most recent assistant message', () => {
+    const s = feed(
+      initialAppState,
+      { type: 'agent_token', text: 'first answer' },
+      { type: 'agent_tool_call', id: 't1', name: 'x', input: null },
+      { type: 'agent_token', text: 'second answer with $9.99' },
+      { type: 'provenance_warning', numbers: ['$9.99'], text: 'unsourced' },
+    );
+    const agents = s.chat.filter((c) => c.kind === 'agent');
+    expect(agents).toHaveLength(2);
+    expect(agents[0]?.kind === 'agent' && agents[0].provenance).toHaveLength(0);
+    expect(agents[1]?.kind === 'agent' && agents[1].provenance).toHaveLength(1);
+  });
+
+  it('provenance_warning: surfaces standalone when there is no message to attach to', () => {
+    const s = applyServerEvent(initialAppState, {
+      type: 'provenance_warning',
+      numbers: ['42'],
+      text: 'unsourced',
+    });
+    expect(s.chat).toHaveLength(1);
+    expect(s.chat[0]?.kind).toBe('provenance');
   });
 
   it('warning: accumulates dismissable warnings with unique ids', () => {
@@ -178,8 +284,15 @@ describe('socket reducer — one branch per contract event type', () => {
       'agent_done',
       'optimizer_progress',
       'warning',
+      'calibration',
+      'provenance_warning',
     ];
-    expect(types).toHaveLength(9);
+    expect(types).toHaveLength(11);
+  });
+
+  it('ignores an unknown event type instead of throwing', () => {
+    const rogue = { type: 'not_a_real_event', payload: 1 } as unknown as ServerEvent;
+    expect(() => applyServerEvent(initialAppState, rogue)).not.toThrow();
   });
 });
 

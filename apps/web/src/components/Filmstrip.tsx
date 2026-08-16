@@ -1,8 +1,17 @@
+import type { ExtractResponse } from '../api/types';
 import { useStore } from '../state/store';
-import { formatClock, formatMs, latencyColorClass } from '../lib/format';
-import { Badge } from './ui';
+import { formatCount, formatMs, formatClock, latencyColorClass } from '../lib/format';
+import { Badge, Button } from './ui';
 
-export function Filmstrip() {
+export function Filmstrip({
+  onExtract,
+  extracting = false,
+  lastExtract = null,
+}: {
+  onExtract?: (captureIds: string[]) => void;
+  extracting?: boolean;
+  lastExtract?: ExtractResponse | null;
+}) {
   const captures = useStore((s) => s.captures);
   const selected = useStore((s) => s.selectedCaptureId);
   const dispatch = useStore((s) => s.dispatch);
@@ -15,6 +24,49 @@ export function Filmstrip() {
         </h2>
         <span className="num text-[10px] text-ink-500">{captures.length}</span>
       </header>
+
+      {/* Extraction runs speculatively the moment a capture lands, so this is
+          the recovery path: re-read the selected capture after a failed pass,
+          or deliberately re-read a different frame. */}
+      {onExtract && selected && (
+        <div className="shrink-0 border-b border-ink-750 bg-ink-900 px-1.5 py-1">
+          <Button
+            size="sm"
+            onClick={() => onExtract([selected])}
+            disabled={extracting}
+            title="Re-run extraction over the selected capture"
+          >
+            {extracting ? 'Extracting…' : 'Re-extract selected'}
+          </Button>
+          {lastExtract && !extracting && (
+            <div className="mt-1 space-y-0.5" data-testid="extract-result">
+              <div className="flex items-baseline gap-1.5">
+                <span className={`num text-[11px] ${latencyColorClass(lastExtract.elapsed_ms)}`}>
+                  {formatMs(lastExtract.elapsed_ms)}
+                </span>
+                <span className="text-[9px] text-ink-500">/ 4,000 ms budget</span>
+              </div>
+              {lastExtract.used_delta && (
+                <Badge tone="good">DELTA RE-READ — only what changed</Badge>
+              )}
+              <div className="num text-[10px] text-ink-400">
+                {formatCount(lastExtract.auto_confirmed)} auto-confirmed ·{' '}
+                <span className={lastExtract.disputed.length > 0 ? 'text-warn' : 'text-ink-400'}>
+                  {formatCount(lastExtract.disputed.length)} disputed
+                </span>
+                {lastExtract.unresolved.length > 0 && (
+                  <>
+                    {' · '}
+                    <span className="text-bad">
+                      {formatCount(lastExtract.unresolved.length)} unresolved
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="filmstrip">
         {captures.length === 0 && (

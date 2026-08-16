@@ -1,23 +1,24 @@
-import type { MoneyPoint } from '../api/types';
-import type { ChatItem } from '../state/reducer';
+import type { MoneyByHour, MoneyPoint } from '../api/types';
 
 /**
- * The contract streams the optimizer's curve directly, but the "current config"
- * curve only exists inside a `simulate_config` tool result. Pull the newest one
- * out of the transcript rather than showing an empty line.
+ * Convert a backend `money_by_hour` array into chart points.
+ *
+ * The contract is explicit: the array has length `horizon_hours + 1`, index 0
+ * is the money on hand BEFORE hour 1 runs, and index h is the money at the end
+ * of hour h. So the array index *is* the hour — plotting index 0 as hour 1
+ * would shift every line by one hour and misreport when the first sale lands.
+ *
+ * `null` means "this session has no such line" and stays `null`: it must render
+ * as an absent series, never as zeros, because a flat zero line reads as a real
+ * and catastrophic run.
  */
-export function currentCurveFromChat(chat: ChatItem[]): MoneyPoint[] {
-  for (let i = chat.length - 1; i >= 0; i--) {
-    const item = chat[i];
-    if (!item || item.kind !== 'tool' || item.output === null) continue;
-    if (typeof item.output !== 'object' || Array.isArray(item.output)) continue;
-    const byHour = (item.output as Record<string, unknown>)['by_hour'];
-    if (!Array.isArray(byHour)) continue;
-    const points: MoneyPoint[] = [];
-    byHour.forEach((v, hour) => {
-      if (typeof v === 'number') points.push({ hour, value: v });
-    });
-    if (points.length > 0) return points;
-  }
-  return [];
+export function hourlyToPoints(values: MoneyByHour | null | undefined): MoneyPoint[] | null {
+  if (values === null || values === undefined) return null;
+  const points: MoneyPoint[] = [];
+  values.forEach((value, hour) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      points.push({ hour, value });
+    }
+  });
+  return points.length > 0 ? points : null;
 }

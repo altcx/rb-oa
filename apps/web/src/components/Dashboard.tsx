@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { isMockMode, mockForcedByEnv, setMockMode } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import { useStore } from '../state/store';
-import { currentCurveFromChat } from '../lib/money';
-import { formatMs, latencyColorClass } from '../lib/format';
-import { MOCK_LP_BOUND, mockCurrentCurve, mockObservedCurve } from '../mock/fixtures';
+import { hourlyToPoints } from '../lib/money';
+import { formatCount, formatMs, latencyColorClass } from '../lib/format';
 import { Link } from '../router';
 import { ChatPanel } from './ChatPanel';
 import { Filmstrip } from './Filmstrip';
@@ -41,7 +40,6 @@ function ConnectionPill({ status, attempt }: { status: string; attempt: number }
 
 export function Dashboard() {
   const session = useSession();
-  const chat = useStore((s) => s.chat);
   const optimizer = useStore((s) => s.optimizer);
   const extraction = useStore((s) => s.extraction);
   const warnings = useStore((s) => s.warnings);
@@ -51,15 +49,25 @@ export function Dashboard() {
   const [legendOpen, setLegendOpen] = useState(false);
   const mock = isMockMode();
 
-  const currentCurve = useMemo(() => {
-    const fromChat = currentCurveFromChat(chat);
-    if (fromChat.length > 0) return fromChat;
-    return mock ? mockCurrentCurve : [];
-  }, [chat, mock]);
+  const chart = session.chart;
 
-  const observedCurve = useMemo(() => (mock ? mockObservedCurve : []), [mock]);
-  const bestCurve = optimizer?.money_by_hour ?? [];
-  const bound = optimizer?.bound ?? (mock ? MOCK_LP_BOUND : null);
+  // The chart endpoint is the source of truth for all three lines. The one
+  // exception is the optimizer's line while a job is streaming: non-final
+  // progress events carry `money_by_hour` in band, so the best line moves live
+  // between refetches. A final event triggers a refetch, and the endpoint wins.
+  const currentCurve = useMemo(() => hourlyToPoints(chart?.current), [chart]);
+  const observedCurve = useMemo(() => hourlyToPoints(chart?.observed), [chart]);
+  const bestCurve = useMemo(() => {
+    const streaming = optimizer && !optimizer.final ? hourlyToPoints(optimizer.money_by_hour) : null;
+    return streaming ?? hourlyToPoints(chart?.best);
+  }, [optimizer, chart]);
+
+  const bound = chart?.bound ?? optimizer?.bound ?? null;
+
+  const tally =
+    extraction?.auto_confirmed !== undefined && extraction.disputed !== undefined
+      ? { agreed: extraction.auto_confirmed, total: extraction.auto_confirmed + extraction.disputed }
+      : null;
 
   // Global hotkeys. `A` lives in the inspector; everything else is here.
   useEffect(() => {
@@ -106,6 +114,14 @@ export function Dashboard() {
           </span>
         )}
 
+        {/* The tally lands with extraction, before the inspector is opened. */}
+        {tally && (
+          <span className="num text-[10px] text-ink-200" data-testid="extraction-tally">
+            <span className="text-good">{formatCount(tally.agreed)}</span> of{' '}
+            {formatCount(tally.total)} fields agreed
+          </span>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           <ShortcutStrip />
           <Button size="sm" onClick={() => void session.captureMonitor(1)}>
@@ -139,6 +155,16 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* A 412 from the optimizer is a precondition, not a crash. */}
+      {session.calibrationGate && (
+        <div
+          role="alert"
+          className="shrink-0 border-b border-warn/40 bg-warn/10 px-2 py-1 text-[11px] text-warn"
+        >
+          {session.calibrationGate}
+        </div>
+      )}
+
       {warnings.length > 0 && (
         <div className="shrink-0 border-b border-warn/30 bg-warn/10 px-2 py-0.5">
           {warnings.slice(-2).map((w) => (
@@ -159,7 +185,11 @@ export function Dashboard() {
       {/* ---------------- three panes ---------------- */}
       <div className="grid min-h-0 flex-1 grid-cols-[13rem_minmax(0,1fr)_22rem]">
         <aside className="min-h-0 border-r border-ink-700 bg-ink-900">
-          <Filmstrip />
+          <Filmstrip
+            onExtract={(ids) => void session.extract(ids)}
+            extracting={session.extracting}
+            lastExtract={session.lastExtract}
+          />
         </aside>
 
         <main className="grid min-h-0 grid-rows-[minmax(0,1fr)_17rem]">

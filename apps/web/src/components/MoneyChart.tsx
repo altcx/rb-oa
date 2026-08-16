@@ -14,17 +14,33 @@ import { formatHour, formatMoney, formatMoneyAxis, formatMoneyDelta } from '../l
 
 /** Validated dark-surface categorical slots 1–3. Identity, not rank. */
 const SERIES = [
-  { key: 'current', name: 'Current config', color: '#3987e5' },
-  { key: 'best', name: 'Optimizer best', color: '#d95926' },
-  { key: 'observed', name: 'Observed run', color: '#199e70' },
+  {
+    key: 'current',
+    name: 'Current config',
+    color: '#3987e5',
+    absent: 'not simulated yet',
+  },
+  {
+    key: 'best',
+    name: 'Optimizer best',
+    color: '#d95926',
+    absent: 'optimizer has not run',
+  },
+  {
+    key: 'observed',
+    name: 'Observed run',
+    color: '#199e70',
+    absent: 'not recorded yet',
+  },
 ] as const;
 
 type SeriesKey = (typeof SERIES)[number]['key'];
 
 export interface MoneyChartProps {
-  current: MoneyPoint[];
-  best: MoneyPoint[];
-  observed: MoneyPoint[];
+  /** null means the session has no such line — render it absent, never as 0. */
+  current: MoneyPoint[] | null;
+  best: MoneyPoint[] | null;
+  observed: MoneyPoint[] | null;
   /** LP relaxation upper bound; drawn as a horizontal reference line. */
   bound: number | null;
 }
@@ -33,7 +49,8 @@ type Row = { hour: number } & Partial<Record<SeriesKey, number>>;
 
 function buildRows(props: MoneyChartProps): Row[] {
   const byHour = new Map<number, Row>();
-  const add = (key: SeriesKey, points: MoneyPoint[]) => {
+  const add = (key: SeriesKey, points: MoneyPoint[] | null) => {
+    if (!points) return;
     for (const p of points) {
       const row = byHour.get(p.hour) ?? { hour: p.hour };
       row[key] = p.value;
@@ -46,7 +63,8 @@ function buildRows(props: MoneyChartProps): Row[] {
   return [...byHour.values()].sort((a, b) => a.hour - b.hour);
 }
 
-function lastValue(points: MoneyPoint[]): number | null {
+function lastValue(points: MoneyPoint[] | null): number | null {
+  if (!points) return null;
   const last = points[points.length - 1];
   return last ? last.value : null;
 }
@@ -60,6 +78,12 @@ interface TooltipShape {
 export function MoneyChart(props: MoneyChartProps) {
   const { bound } = props;
   const rows = useMemo(() => buildRows(props), [props]);
+
+  const series: Record<SeriesKey, MoneyPoint[] | null> = {
+    current: props.current,
+    best: props.best,
+    observed: props.observed,
+  };
 
   const lasts: Record<SeriesKey, number | null> = {
     current: lastValue(props.current),
@@ -86,6 +110,21 @@ export function MoneyChart(props: MoneyChartProps) {
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-ink-750 px-2 py-1">
         {SERIES.map((s) => {
           const v = lasts[s.key];
+          const present = series[s.key] !== null;
+          // An absent line says so in words. It is never drawn as zero — a flat
+          // zero line reads as a real and catastrophic run.
+          if (!present) {
+            return (
+              <div key={s.key} className="flex items-baseline gap-1.5 opacity-50">
+                <span
+                  className="inline-block h-0 w-4 translate-y-[-3px] border-t border-dashed border-ink-500"
+                  aria-hidden
+                />
+                <span className="text-[10px] text-ink-500">{s.name}</span>
+                <span className="text-[10px] text-ink-500 italic">— {s.absent}</span>
+              </div>
+            );
+          }
           return (
             <div key={s.key} className="flex items-baseline gap-1.5">
               <span
@@ -124,7 +163,8 @@ export function MoneyChart(props: MoneyChartProps) {
       <div className="min-h-0 flex-1">
         {!hasData ? (
           <p className="px-2 py-8 text-center text-[11px] text-ink-500">
-            No money curve yet. Start the optimizer or run a simulation to populate this chart.
+            No money curve yet — confirm a board state, then run the optimizer or a calibration.
+            Absent lines stay absent rather than being drawn as zero.
           </p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -177,7 +217,7 @@ export function MoneyChart(props: MoneyChartProps) {
                       <div className="num mb-1 text-[11px] text-ink-300">
                         {typeof p.label === 'number' ? formatHour(p.label) : String(p.label ?? '')}
                       </div>
-                      {SERIES.map((s) => {
+                      {SERIES.filter((s) => series[s.key] !== null).map((s) => {
                         const v = values.get(s.key);
                         return (
                           <div key={s.key} className="flex items-baseline gap-2">
@@ -209,7 +249,7 @@ export function MoneyChart(props: MoneyChartProps) {
                   );
                 }}
               />
-              {SERIES.map((s) => (
+              {SERIES.filter((s) => series[s.key] !== null).map((s) => (
                 <Line
                   key={s.key}
                   type="monotone"

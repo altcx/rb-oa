@@ -4,6 +4,41 @@ import type { ChatItem } from '../state/reducer';
 import { ToolCallCard } from './ToolCallCard';
 import { Kbd } from './ui';
 
+/**
+ * An unsourced-number alarm. This is a correctness failure in the assistant's
+ * answer, not a dismissable toast, so it renders attached to the message that
+ * made the claim and names the exact offending tokens.
+ */
+function ProvenanceAlarm({ numbers, text }: { numbers: string[]; text: string }) {
+  return (
+    <div
+      role="alert"
+      data-testid="provenance-warning"
+      className="mt-1 rounded border border-warn bg-warn/15 px-1.5 py-1"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="text-warn" aria-hidden>
+          ⚠
+        </span>
+        <span className="text-[10px] font-semibold tracking-wide text-warn uppercase">
+          Unverified numbers
+        </span>
+      </div>
+      <p className="mt-0.5 text-[11px] leading-snug text-warn/90">{text}</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {numbers.map((n, i) => (
+          <span
+            key={`${n}-${i}`}
+            className="num rounded border border-warn/50 bg-ink-950 px-1 py-px text-[11px] text-warn"
+          >
+            {n}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case 'user':
@@ -14,13 +49,26 @@ function Bubble({ item }: { item: ChatItem }) {
       );
     case 'agent':
       return (
-        <div className="text-xs leading-relaxed whitespace-pre-wrap text-ink-200">
-          {item.text}
-          {!item.complete && (
-            <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-px bg-series-1 align-baseline" />
-          )}
+        <div
+          className={
+            item.provenance.length > 0
+              ? 'border-l-2 border-l-warn pl-1.5'
+              : undefined
+          }
+        >
+          <div className="text-xs leading-relaxed whitespace-pre-wrap text-ink-200">
+            {item.text}
+            {!item.complete && (
+              <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-px bg-series-1 align-baseline" />
+            )}
+          </div>
+          {item.provenance.map((p, i) => (
+            <ProvenanceAlarm key={i} numbers={p.numbers} text={p.text} />
+          ))}
         </div>
       );
+    case 'provenance':
+      return <ProvenanceAlarm numbers={item.numbers} text={item.text} />;
     case 'tool':
       return <ToolCallCard item={item} />;
     case 'notice':

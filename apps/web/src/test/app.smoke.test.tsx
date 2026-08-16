@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard } from '../components/Dashboard';
 import { Hud } from '../components/Hud';
 import { useStore } from '../state/store';
 import { initialAppState } from '../state/reducer';
+import { resetMockState } from '../mock/mockApi';
 
 /** Drain the mock REST delays and the scripted socket replay. */
 async function replay(ms: number) {
@@ -18,6 +19,7 @@ beforeEach(() => {
   window.localStorage.setItem('puzzle-copilot.mock', '1');
   vi.useFakeTimers();
   useStore.setState({ ...initialAppState });
+  resetMockState();
 });
 
 afterEach(() => {
@@ -39,6 +41,12 @@ describe('mock-mode smoke render', () => {
     expect(screen.getByText('Optimizer best')).toBeInTheDocument();
     expect(screen.getByText('Observed run')).toBeInTheDocument();
     expect(screen.getAllByText(/LP bound/).length).toBeGreaterThan(0);
+
+    // Before calibration the observed and best lines do not exist. They must be
+    // named as absent in words — never drawn as a flat zero run.
+    expect(screen.getByText(/not recorded yet/)).toBeInTheDocument();
+    expect(screen.getByText(/optimizer has not run/)).toBeInTheDocument();
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
 
     // REST fixtures hydrated captures, state and the leaderboard.
     expect(screen.getByTestId('review-counter')).toHaveTextContent(
@@ -71,6 +79,51 @@ describe('mock-mode smoke render', () => {
     expect(last.best_value).toBeGreaterThan(first.best_value);
     expect(last.best_value).toBeLessThan(last.bound);
     expect(s.warnings.length).toBeGreaterThan(0);
+
+    // only the terminal optimizer event is final
+    expect(s.optimizer?.final).toBe(true);
+    expect(screen.getByText('FINAL')).toBeInTheDocument();
+
+    // calibration landed, so the observed line exists now
+    expect(s.calibration?.matched).toBe(true);
+    expect(screen.queryByText(/not recorded yet/)).not.toBeInTheDocument();
+
+    // the provenance alarm is attached to the assistant message that made the claim
+    const alarm = screen.getByTestId('provenance-warning');
+    expect(alarm).toBeInTheDocument();
+    expect(alarm).toHaveTextContent('$186.00');
+    expect(screen.getByText('Unverified numbers')).toBeInTheDocument();
+
+    // the extraction tally showed without opening the inspector
+    expect(screen.getByTestId('extraction-tally')).toHaveTextContent('37 of 40 fields agreed');
+  });
+
+  it('re-extracts the selected capture and reports elapsed time and delta use', async () => {
+    render(<Dashboard />);
+    await replay(500);
+
+    // fireEvent, not userEvent: user-event's own delays deadlock against the
+    // fake timers this suite uses to drive the replay.
+    const click = (name: RegExp) =>
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name }));
+      });
+
+    // First pass is a full extraction.
+    await click(/re-extract selected/i);
+    await replay(2_000);
+    const firstResult = screen.getByTestId('extract-result');
+    expect(firstResult).toHaveTextContent('3,420 ms');
+    expect(screen.queryByText(/DELTA RE-READ/)).not.toBeInTheDocument();
+
+    // Second pass over the same capture is a fast delta re-read, and says so.
+    await click(/re-extract selected/i);
+    await replay(2_000);
+    const second = screen.getByTestId('extract-result');
+    expect(second).toHaveTextContent('1,180 ms');
+    expect(screen.getByText(/DELTA RE-READ/)).toBeInTheDocument();
+    expect(second).toHaveTextContent('37 auto-confirmed');
+    expect(second).toHaveTextContent('3 disputed');
   });
 
   it('renders the HUD at exactly 240x80 with a latency readout', async () => {

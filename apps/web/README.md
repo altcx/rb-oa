@@ -36,16 +36,22 @@ Turn it on either way:
 What the fake socket replays, in order (`src/mock/fakeSocket.ts`):
 
 1. `capture` — a new board screenshot
-2. five `extraction_progress` stages (decode → three jury models → reconcile)
+2. five `extraction_progress` stages (decode → three jury models → reconcile);
+   the terminal stage carries `disputed: 3, auto_confirmed: 37`, which the header
+   shows as "37 of 40 fields agreed" before the inspector is opened
 3. `state` — **40 fields, 3 disputed** (1 three-way `split`, 2 `majority`)
 4. `agent_token` streaming prose, character-accurate word-by-word
 5. `agent_tool_call` / `agent_tool_result` for `read_rules`, then for
    `simulate_config` — two collapsible cards
 6. more streamed tokens, then `agent_done`
-7. a `warning`
-8. **8 `optimizer_progress` events** with `best_value` climbing toward a fixed LP
-   `bound`, a fresh `money_by_hour` curve each time, and a `top_warning`
-   appearing partway through
+7. a `provenance_warning` naming two figures the agent stated that no tool result
+   supports — rendered attached to that assistant message
+8. a `warning`
+9. a `calibration` event; the mock REST layer flips with it, so `GET /chart`
+   stops returning `observed: null` and the absent legend entry becomes a line
+10. **8 `optimizer_progress` events** with `best_value` climbing toward a fixed LP
+    `bound`, a fresh `money_by_hour` curve each time, a `top_warning` appearing
+    partway through, and `final: true` on the last one only
 
 Pressing **C** (or the capture button, or the HUD button) in mock mode publishes
 through `src/mock/bus.ts` and pushes a *new* capture + re-extraction down the
@@ -68,10 +74,9 @@ justify a dependency. It resolves **both** `/hud` and `/#/hud`, so if the deskto
 shell opens the HUD window at a hash URL, or the static server has no SPA
 fallback, the route still lands.
 
-> **Backend note:** for path-style routes to work off `dist`, FastAPI needs a
-> catch-all that returns `index.html` for unknown non-`/api`, non-`/ws` paths.
-> Without it, use the hash forms (`/#/hud`, `/#/settings`) — they need no server
-> support.
+Path-style routes work off `dist`: `services/core/main.py` mounts `/assets` and
+serves `index.html` from a `/{full_path:path}` catch-all. The hash forms remain a
+zero-config fallback for any other static host.
 
 The HUD is deliberately kept out of the lazy-loaded chunk: `/hud` ships ~225 kB
 and never parses recharts, while the Dashboard chunk (~425 kB) loads only on
@@ -152,23 +157,61 @@ testable without a DOM.
 - **Same-family jury warning.** `/settings` flags two extractor slots from one
   family: same-family models fail the same way, so a 2–1 majority can be a single
   shared blind spot rather than a real vote.
+- **Provenance alarms are not toasts.** `provenance_warning` means the agent
+  stated a number no tool result supports. It renders inside the chat pane
+  attached to the offending assistant message, marks that message with a warning
+  rule, and lists the exact offending tokens. It cannot be dismissed, because the
+  answer above it is wrong. Orphan alarms (no assistant message to attach to)
+  still render standalone rather than being dropped.
+- **The optimizer's calibration gate is a precondition, not a crash.** `POST
+  /api/solve/optimize` answers 412 until a recorded run has matched the
+  simulator; the UI catches that status specifically and explains it, instead of
+  printing an HTTP error.
+- **Re-extraction is the recovery path**, not the primary one — extraction starts
+  speculatively when a capture lands. The filmstrip's "Re-extract selected"
+  action calls `POST /api/extract`, shows `elapsed_ms` against the same 4 s
+  budget the HUD colour-codes, and labels a `used_delta` pass as a delta re-read
+  so the operator learns to expect it to be fast.
 
 ## Tests
 
 ```
 src/test/format.test.ts      17  number/latency/value formatting
-src/test/reducer.test.ts     20  every socket event type + review selectors
+src/test/reducer.test.ts     27  all 11 socket event types + review selectors
+src/test/money.test.ts       11  hour-0 indexing, null-is-not-zero
 src/test/inspector.test.tsx  13  Tab/Shift-Tab/Enter/A/1-9 flow, agreed collapse
-src/test/app.smoke.test.tsx   3  mock-mode render of Dashboard + HUD, full replay
+src/test/app.smoke.test.tsx   4  mock-mode render, full replay, re-extract flow
+                             ---
+                              72
 ```
+
+## The money chart and `GET /api/sessions/{id}/chart`
+
+All three lines come from the chart endpoint — no more scavenging curves out of
+tool results. Two details in this wiring are easy to get wrong and are covered by
+tests in `src/test/money.test.ts`:
+
+**The array index is the hour.** `money_by_hour` has length `horizon_hours + 1`;
+index 0 is the money on hand *before* hour 1 runs, and index h is the money at
+the end of hour h. `hourlyToPoints` in `src/lib/money.ts` maps index → hour
+directly. Plotting index 0 as hour 1 would shift every line by an hour and
+misreport when the first sale lands — precisely what the reader is here to see.
+
+**`null` is not zero.** A line the session does not have comes back `null` and is
+rendered *absent*: no line drawn, and a greyed legend entry saying why —
+"Observed run — not recorded yet", "Optimizer best — optimizer has not run". It
+is never coerced to `0`, because a flat zero line reads as a real and
+catastrophic run. `hourlyToPoints(null)` returns `null`, and an empty array is
+also treated as absent (but a genuine `0.0` value is preserved).
+
+The chart is refetched on mount and when a `state` event, a `calibration` event,
+or a **final** `optimizer_progress` event arrives. Non-final optimizer ticks are
+deliberately *not* a refetch trigger: they carry `money_by_hour` in band, so the
+optimizer line animates live between refetches and the endpoint wins once the
+job finishes.
 
 ## Known gaps
 
-- The **"current config"** money line is read from the newest `simulate_config`
-  tool result (`output.by_hour`); the **"observed run"** line has no endpoint in
-  the contract at all and is fixture-only. Both fall back to fixtures in mock
-  mode and render as absent (not zero) against a live backend. A REST endpoint
-  returning both baselines would close this.
 - The HUD's click-through and always-on-top behaviour is a window-manager
   property; this app only guarantees the 240×80 footprint and
   `pointer-events: none` everywhere except the capture button.

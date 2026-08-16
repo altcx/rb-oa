@@ -31,21 +31,37 @@ export function OptimizerBar({
   const gapRatio = opt && opt.bound !== 0 ? (opt.bound - opt.best_value) / opt.bound : null;
   const prev = history.length >= 2 ? history[history.length - 2] : undefined;
   const improvement = opt && prev ? opt.best_value - prev.best_value : null;
+  // `final` marks the terminal event: this is the answer, not another tick.
+  const done = opt?.final === true;
 
   return (
     <div className="shrink-0 border-b border-ink-750 bg-ink-850">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-2 py-1">
-        <h2 className="text-[11px] font-semibold tracking-wide text-ink-300 uppercase">
+        <h2 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-ink-300 uppercase">
           Optimizer
+          {opt &&
+            (done ? (
+              <Badge tone="good">FINAL</Badge>
+            ) : (
+              <Badge tone="info">RUNNING</Badge>
+            ))}
         </h2>
 
         {opt ? (
           <>
             <Stat
-              label="best so far"
+              label={done ? 'best (final)' : 'best so far'}
               value={formatMoney(opt.best_value)}
               tone="series-2"
-              sub={improvement !== null ? `${formatMoneyDelta(improvement)} last step` : undefined}
+              sub={
+                done
+                  ? gapRatio !== null && gapRatio < 0.001
+                    ? 'proven optimal — matches the bound'
+                    : 'search finished at this value'
+                  : improvement !== null
+                    ? `${formatMoneyDelta(improvement)} last step`
+                    : undefined
+              }
             />
             <Stat label="LP bound" value={formatMoney(opt.bound)} />
             <Stat
@@ -64,9 +80,15 @@ export function OptimizerBar({
                   {opt.actions.length === 1 ? '' : 's'}
                 </Button>
               )}
-              <Button size="sm" variant="danger" onClick={() => onCancel(opt.job_id)}>
-                Cancel
-              </Button>
+              {done ? (
+                <Button size="sm" variant="primary" onClick={() => onStart(seconds)}>
+                  Run again
+                </Button>
+              ) : (
+                <Button size="sm" variant="danger" onClick={() => onCancel(opt.job_id)}>
+                  Cancel
+                </Button>
+              )}
             </div>
           </>
         ) : (

@@ -1,4 +1,5 @@
 import type {
+  CalibrationResult,
   Capture,
   JsonValue,
   OptimizerProgressEvent,
@@ -16,12 +17,20 @@ export interface ChatUserItem {
   id: string;
   text: string;
 }
+/** An unsourced-number alarm raised against a specific assistant message. */
+export interface ProvenanceWarning {
+  numbers: string[];
+  text: string;
+}
+
 export interface ChatAgentItem {
   kind: 'agent';
   id: string;
   text: string;
   /** false while tokens are still arriving into this bubble. */
   complete: boolean;
+  /** Numbers in THIS message that no tool result supports. */
+  provenance: ProvenanceWarning[];
 }
 export interface ChatToolItem {
   kind: 'tool';
@@ -36,7 +45,19 @@ export interface ChatNoticeItem {
   id: string;
   text: string;
 }
-export type ChatItem = ChatUserItem | ChatAgentItem | ChatToolItem | ChatNoticeItem;
+/** A provenance alarm with no assistant message to attach to. */
+export interface ChatProvenanceItem {
+  kind: 'provenance';
+  id: string;
+  numbers: string[];
+  text: string;
+}
+export type ChatItem =
+  | ChatUserItem
+  | ChatAgentItem
+  | ChatToolItem
+  | ChatNoticeItem
+  | ChatProvenanceItem;
 
 export interface WarningItem {
   id: string;
@@ -46,6 +67,9 @@ export interface WarningItem {
 export interface ExtractionProgress {
   stage: string;
   ms: number;
+  /** Present on the terminal stage, so the tally shows before the inspector. */
+  disputed?: number;
+  auto_confirmed?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,6 +89,8 @@ export interface AppState {
   optimizer: OptimizerProgressEvent | null;
   /** best_value / bound over time, so the user can see the gap closing. */
   optimizerHistory: Array<{ elapsed_s: number; best_value: number; bound: number }>;
+  /** Result of the last calibration run; the observed line depends on it. */
+  calibration: CalibrationResult | null;
   warnings: WarningItem[];
   /** Monotonic counter used to mint ids without touching Math.random in tests. */
   seq: number;
@@ -81,6 +107,7 @@ export const initialAppState: AppState = {
   chat: [],
   optimizer: null,
   optimizerHistory: [],
+  calibration: null,
   warnings: [],
   seq: 0,
 };
@@ -162,6 +189,12 @@ export function appReducer(state: AppState, action: Action): AppState {
 
     case 'socket':
       return applyServerEvent(state, action.event);
+
+    default: {
+      const unhandled: never = action;
+      void unhandled;
+      return state;
+    }
   }
 }
 
@@ -182,6 +215,8 @@ export function applyServerEvent(state: AppState, event: ServerEvent): AppState 
 
     case 'extraction_progress': {
       const entry: ExtractionProgress = { stage: event.stage, ms: event.ms };
+      if (event.disputed !== undefined) entry.disputed = event.disputed;
+      if (event.auto_confirmed !== undefined) entry.auto_confirmed = event.auto_confirmed;
       return {
         ...state,
         extraction: entry,
@@ -195,7 +230,10 @@ export function applyServerEvent(state: AppState, event: ServerEvent): AppState 
         verdicts: event.verdicts,
         unresolved: event.unresolved,
       };
-      return { ...state, statePayload: payload, accepted: {}, extraction: null };
+      // The terminal extraction entry is kept deliberately: it carries the
+      // "N of M fields agreed" tally, which stays useful after the state lands
+      // and is only stale once a NEW capture starts a new extraction cycle.
+      return { ...state, statePayload: payload, accepted: {} };
     }
 
     case 'agent_token': {
@@ -209,7 +247,13 @@ export function applyServerEvent(state: AppState, event: ServerEvent): AppState 
         seq: state.seq + 1,
         chat: [
           ...state.chat,
-          { kind: 'agent', id: nextId(state, 'agent'), text: event.text, complete: false },
+          {
+            kind: 'agent',
+            id: nextId(state, 'agent'),
+            text: event.text,
+            complete: false,
+            provenance: [],
+          },
         ],
       };
     }
@@ -274,7 +318,56 @@ export function applyServerEvent(state: AppState, event: ServerEvent): AppState 
         seq: state.seq + 1,
         warnings: [...state.warnings, { id: nextId(state, 'warn'), text: event.text }],
       };
+
+    case 'calibration':
+      return { ...state, calibration: event.result };
+
+    case 'provenance_warning': {
+      const warning: ProvenanceWarning = { numbers: event.numbers, text: event.text };
+      // Attach to the offending assistant message — the most recent one, which
+      // is the message the guard just checked.
+      const lastAgentIndex = findLastAgentIndex(state.chat);
+      if (lastAgentIndex >= 0) {
+        const chat = [...state.chat];
+        const target = chat[lastAgentIndex] as ChatAgentItem;
+        chat[lastAgentIndex] = {
+          ...target,
+          provenance: [...target.provenance, warning],
+        };
+        return { ...state, chat };
+      }
+      // No assistant message to hang it on: surface it standalone rather than
+      // dropping a correctness alarm on the floor.
+      return {
+        ...state,
+        seq: state.seq + 1,
+        chat: [
+          ...state.chat,
+          {
+            kind: 'provenance',
+            id: nextId(state, 'prov'),
+            numbers: event.numbers,
+            text: event.text,
+          },
+        ],
+      };
+    }
+
+    default: {
+      // Exhaustive at compile time, tolerant at runtime: a backend that adds a
+      // new event type must not blank the store of a running session.
+      const unhandled: never = event;
+      void unhandled;
+      return state;
+    }
   }
+}
+
+function findLastAgentIndex(chat: ChatItem[]): number {
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (chat[i]?.kind === 'agent') return i;
+  }
+  return -1;
 }
 
 function closeOpenAgentBubble(chat: ChatItem[]): ChatItem[] {

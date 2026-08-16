@@ -1,7 +1,10 @@
 import type {
   CaptureIdResponse,
   CapturesResponse,
+  ChartResponse,
   CreateSessionRequest,
+  ExtractRequest,
+  ExtractResponse,
   CreateSessionResponse,
   JobResponse,
   KeyRequest,
@@ -20,6 +23,8 @@ import { emitMockCapture } from './bus';
 import {
   MOCK_SESSION_ID,
   mockCaptures,
+  mockChart,
+  mockChartAfterCalibration,
   mockKeyResult,
   mockLeaderboard,
   mockModels,
@@ -68,6 +73,48 @@ export function captureRegion(): Promise<CaptureIdResponse> {
 export function getState(): Promise<StatePayload> {
   return respond(mockState);
 }
+
+/**
+ * Before calibration the observed line does not exist and the optimizer has not
+ * run, so both come back null. The fake socket flips this once it replays the
+ * calibration event, which is how mock mode demos the absent-line states.
+ */
+let calibrated = false;
+
+export function markMockCalibrated(): void {
+  calibrated = true;
+}
+
+/** Reset the mutable mock session, so tests do not leak state into each other. */
+export function resetMockState(): void {
+  calibrated = false;
+  extractedCaptures.clear();
+  leaderboard = [...mockLeaderboard];
+  roles = { ...mockModels.roles };
+}
+
+export function getChart(): Promise<ChartResponse> {
+  return respond(calibrated ? mockChartAfterCalibration : mockChart);
+}
+
+export function extract(body: ExtractRequest): Promise<ExtractResponse> {
+  // A re-read of a capture already extracted is a fast delta pass.
+  const isDelta = extractedCaptures.size > 0;
+  for (const id of body.capture_ids) extractedCaptures.add(id);
+  return respond(
+    {
+      ok: true,
+      disputed: mockState.verdicts.filter((v) => v.status !== 'unanimous').map((v) => v.path),
+      auto_confirmed: mockState.verdicts.filter((v) => v.status === 'unanimous').length,
+      unresolved: mockState.unresolved,
+      elapsed_ms: isDelta ? 1180 : 3420,
+      used_delta: isDelta,
+    },
+    isDelta ? 300 : 900,
+  );
+}
+
+const extractedCaptures = new Set<string>();
 
 export function ok(): Promise<OkResponse> {
   return respond({ ok: true as const }, 40);

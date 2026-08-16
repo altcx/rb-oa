@@ -1,8 +1,9 @@
 import type {
   Capture,
+  ChartResponse,
   LeaderboardEntry,
   ModelsResponse,
-  MoneyPoint,
+  MoneyByHour,
   RulesResponse,
   SessionSummary,
   StatePayload,
@@ -261,29 +262,70 @@ export const mockRules: RulesResponse = {
 
 const HOURS = 12;
 
-function curve(peak: number, shape: number, noise: number): MoneyPoint[] {
-  const pts: MoneyPoint[] = [];
-  let acc = 0;
+/** Starting money — index 0 of every curve, before hour 1 has run. */
+const STARTING_MONEY = 4820.5;
+
+/**
+ * A `money_by_hour` array exactly as the backend emits it: length
+ * `horizon_hours + 1`, index 0 = starting money, index h = money at end of h.
+ */
+function curve(peak: number, shape: number, noise: number): MoneyByHour {
+  const values: number[] = [];
+  let acc = STARTING_MONEY;
   for (let h = 0; h <= HOURS; h++) {
+    if (h === 0) {
+      values.push(Math.round(acc * 100) / 100);
+      continue;
+    }
     const t = h / HOURS;
     const rate = peak * (1 - Math.exp(-shape * t));
     acc += rate;
     const wobble = Math.sin(h * 1.7) * noise;
-    pts.push({ hour: h, value: Math.round((acc + wobble) * 100) / 100 });
+    values.push(Math.round((acc + wobble) * 100) / 100);
   }
-  return pts;
+  return values;
 }
 
 /** The config currently loaded in the UI. */
-export const mockCurrentCurve: MoneyPoint[] = curve(980, 2.4, 55);
-/** What the game actually paid out, observed from captures — stops at "now". */
-export const mockObservedCurve: MoneyPoint[] = curve(910, 2.1, 140).slice(0, 8);
+export const mockCurrentCurve: MoneyByHour = curve(980, 2.4, 55);
+/** What the game actually paid out — only exists after calibration. */
+export const mockObservedCurve: MoneyByHour = curve(910, 2.1, 140).slice(0, 8);
 /** Optimizer best-so-far; improves across the replay. */
-export function mockOptimizerCurve(step: number): MoneyPoint[] {
+export function mockOptimizerCurve(step: number): MoneyByHour {
   return curve(980 + step * 46, 2.4 + step * 0.06, 30);
 }
 
 export const MOCK_LP_BOUND = 14260.0;
+
+/**
+ * The chart endpoint before calibration: `observed` is null, not zeros.
+ * `mockChartAfterCalibration` is what the same call returns once a run has been
+ * recorded, which is how the replay demonstrates the null -> present flip.
+ */
+export const mockChart: ChartResponse = {
+  current: mockCurrentCurve,
+  best: null,
+  observed: null,
+  bound: MOCK_LP_BOUND,
+  horizon_hours: HOURS,
+};
+
+export const mockChartAfterCalibration: ChartResponse = {
+  current: mockCurrentCurve,
+  best: mockOptimizerCurve(7),
+  observed: mockObservedCurve,
+  bound: MOCK_LP_BOUND,
+  horizon_hours: HOURS,
+};
+
+export const mockCalibrationResult = {
+  matched: true,
+  mape: 0.019,
+  resolved_flags: { 'power.brownout_scales_or_halts': 'throughput scales linearly' },
+};
+
+/** Fired after the agent quotes a figure no tool result supports. */
+export const mockProvenanceNumbers = ['$186.00', '41 minutes'];
 
 /* ------------------------------------------------------------------ */
 /* Leaderboard                                                         */
