@@ -11,6 +11,8 @@ data/sessions/*
 !data/sessions/.gitkeep
 data/rules/*
 !data/rules/.gitkeep
+data/settings.json
+data/.secrets/
 *.log
 .DS_Store
 .env

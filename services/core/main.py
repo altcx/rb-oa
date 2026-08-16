@@ -469,6 +469,49 @@ async def api_calibrate(body: dict[str, Any] = Body(...)) -> Any:
     return result
 
 
+@app.get("/api/sessions/{session_id}/chart")
+async def api_chart(session_id: str) -> Any:
+    """The three money-over-time lines: current config, optimizer best, and the
+    observed game run.  Three lines on one chart is the most informative view in
+    the app (spec 11), so it gets a first-class endpoint rather than being
+    scavenged out of tool results.
+
+    A line the session does not have comes back as ``null`` — never as zeros,
+    which would read as a real, terrible run.
+    """
+    s = _require(session_id)
+    out: dict[str, Any] = {
+        "current": None,
+        "best": None,
+        "observed": s.observed_money_by_hour,
+        "bound": (s.bound or {}).get("ceiling"),
+        "horizon_hours": (s.state or {}).get("horizon_hours"),
+    }
+    if s.state is None or s.puzzle_type != "factory":
+        return out
+
+    flags = (s.rules or {}).get("flags", {})
+    config = s.config
+    if config is None:
+        with contextlib.suppress(Exception):
+            from services.solvers.factory.model import FactoryConfig, FactoryState
+
+            config = FactoryConfig.from_state(FactoryState.model_validate(s.state)).model_dump(
+                mode="json"
+            )
+    for key, cfg in (("current", config), ("best", (s.optimizer_best or {}).get("best"))):
+        if not cfg:
+            continue
+        try:
+            sim = await manager.run(
+                "simulate_factory", {"state": s.state, "config": cfg, "flags": flags}, timeout_s=30
+            )
+            out[key] = sim.get("money_by_hour")
+        except Exception as exc:
+            log.debug("chart line %s unavailable: %s", key, exc)
+    return out
+
+
 @app.post("/api/solve/builder")
 async def api_solve_builder(body: dict[str, Any] = Body(...)) -> Any:
     s = _require(body["session_id"])
