@@ -530,7 +530,17 @@ class ErrorSpec:
         return True
 
     def hits(self, path: str) -> bool:
-        return any(fnmatch.fnmatch(path, p) for p in self.paths)
+        return any(fnmatch.fnmatch(path, _literal_brackets(p)) for p in self.paths)
+
+
+def _literal_brackets(pattern: str) -> str:
+    """Make ``[`` literal in an fnmatch pattern.
+
+    Field paths are full of brackets (``edges[0].dst``), and fnmatch would read
+    ``[0]`` as a character class matching the single character ``0`` -- so the
+    most natural pattern anyone would write silently matches nothing.
+    """
+    return pattern.replace("[", "[[]")
 
 
 def _corrupt(value: Any) -> Any:

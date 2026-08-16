@@ -15,7 +15,8 @@ from services.core.extract.practice import (
 from tests.fixtures.generate_fixtures import DEFAULT_OUT, ErrorSpec, FakeVisionClient, generate
 
 MODELS = ["famA/one", "famB/two", "famC/three"]
-ROLES = ExtractRoles(jury=MODELS, topology="famA/one", delta="famA/one")
+#: Default roles: the graph is juried like every tile.
+ROLES = ExtractRoles(jury=MODELS, delta="famA/one")
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +104,57 @@ async def test_clean_replay_is_accurate_fast_and_confirms_most_fields(fixtures_d
     assert {"prepare", "fanout", "assemble", "tile:*", "total"} <= stages
     assert all(s.p50_ms <= s.p90_ms <= s.max_ms for s in report.stages)
     assert report.p90_total_ms >= report.p50_total_ms > 0
+
+
+async def test_the_report_says_what_produced_its_headline_number(fixtures_dir):
+    """A 100% auto-confirm rate off a perfect reader measures the pipeline, not
+    the models.  The report has to say so, and it has to measure the reader
+    rather than take anyone's word for it."""
+    perfect = await run_practice(
+        FakeVisionClient.from_dir(fixtures_dir, "factory"), ROLES, fixtures_dir, "factory"
+    )
+    assert perfect.reader_error_rate == 0.0
+    assert "PERFECT reader" in perfect.summary()
+    assert perfect.models == MODELS and perfect.topology_reader == "jury"
+    assert set(perfect.models) <= set(perfect.per_model_error_rate)
+
+    fallible = await run_practice(
+        FakeVisionClient.from_dir(
+            fixtures_dir,
+            "factory",
+            errors={MODELS[2]: [ErrorSpec(paths=("*output_max",), mode="corrupt")]},
+        ),
+        ROLES,
+        fixtures_dir,
+        "factory",
+    )
+    assert fallible.reader_error_rate > 0
+    # the rate is attributed to the model that actually erred
+    assert fallible.per_model_error_rate[MODELS[2]] > 0
+    assert fallible.per_model_error_rate[MODELS[0]] == 0
+    assert f"{fallible.reader_error_rate:.2%}" in fallible.summary()
+    # ...and the jury still absorbs it: fewer auto-confirms, nothing wrong
+    assert fallible.auto_confirm_rate < perfect.auto_confirm_rate
+    assert fallible.field_accuracy == 1.0
+    assert fallible.wrong_auto_confirm_count == 0
+
+
+async def test_a_juried_graph_costs_no_review_when_the_readers_agree(fixtures_dir):
+    """Topology used to be the entire factory review load: one reader, never
+    auto-confirmed.  Juried, an agreed graph settles like any other tile."""
+    report = await run_practice(
+        FakeVisionClient.from_dir(fixtures_dir, "factory"), ROLES, fixtures_dir, "factory"
+    )
+    assert report.disputed_count == 0
+    assert report.auto_confirm_rate == 1.0
+
+    single = ExtractRoles(jury=MODELS, topology=MODELS[0])
+    downgraded = await run_practice(
+        FakeVisionClient.from_dir(fixtures_dir, "factory"), single, fixtures_dir, "factory"
+    )
+    assert downgraded.disputed_count > 0  # one reader is never a confirmation
+    assert downgraded.topology_reader == MODELS[0]
+    assert "single reader" in downgraded.reader_line()
 
 
 async def test_builder_fixtures_replay_too(fixtures_dir):

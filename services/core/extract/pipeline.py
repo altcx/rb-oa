@@ -75,7 +75,12 @@ class ExtractRoles(BaseModel):
     jury: list[str] = Field(default_factory=lambda: list(DEFAULT_JURY))
     #: Only ever called when the jury splits three ways, and only for those fields.
     tie_breaker: str | None = None
-    #: One cheap call, connections only.
+    #: Naming a model here downgrades topology to ONE cheap reader, trading the
+    #: consensus for two calls' worth of tokens.  Left null -- the default -- the
+    #: graph goes through the same three-family jury as every tile.  A flipped
+    #: edge does not cost a verification round trip, it invalidates the entire
+    #: solve while looking completely plausible, so it is the last read on the
+    #: board that should have a single reader.
     topology: str | None = None
     #: Delta re-reads.
     delta: str | None = None
@@ -91,7 +96,8 @@ class ExtractRoles(BaseModel):
         return cls(jury=list(value))
 
     def topology_model(self) -> str:
-        return self.topology or (self.jury[0] if self.jury else "")
+        """The single-reader override, or "" when the jury reads the graph."""
+        return self.topology or ""
 
     def delta_model(self) -> str:
         return self.delta or (self.jury[0] if self.jury else "")
@@ -345,10 +351,12 @@ async def _run_tile(
 ) -> tuple[Tile, PreparedImage, JuryResult]:
     target = prompts.target_for(tile.target)
     messages = target.build(prepared.data_url, hint=tile.name)
+    is_topology = tile.target == "factory_topology"
     t0 = time.perf_counter()
-    if tile.target == "factory_topology":
+    if is_topology and roles.topology:
+        # Explicitly downgraded to one cheap reader.
         result = await _topology_call(
-            client, roles.topology_model(), messages, prepared.crop_id, timeout_s
+            client, roles.topology, messages, prepared.crop_id, timeout_s
         )
     else:
         result = await run_jury(
@@ -359,9 +367,28 @@ async def _run_tile(
             timeout_s=timeout_s,
             tie_breaker=roles.tie_breaker,
             crop_id=prepared.crop_id,
+            # Edges are read as a set, in a canonical order, so that two models
+            # tracing the graph from different corners vote on the same fields.
+            normalizer=sort_edges if is_topology else None,
+            set_paths=("edges",) if is_topology else (),
         )
     await _emit(on_stage, f"tile:{tile.name}", (time.perf_counter() - t0) * 1000.0, stage_ms)
     return tile, prepared, result
+
+
+def _clean_edges(merged: dict[str, Any]) -> dict[str, Any]:
+    """Drop edges the jury did not settle on.
+
+    A disputed edge merges to ``{"src": null, "dst": null}``, which is not an
+    edge and would fail assembly.  Dropping it from the *document* costs
+    nothing: the verdict survives in the provenance with its votes, so the user
+    is still told that one reader saw a connection the others did not.
+    """
+    edges = merged.get("edges")
+    if not isinstance(edges, list):
+        return merged
+    kept = [e for e in edges if isinstance(e, dict) and e.get("src") and e.get("dst")]
+    return {**merged, "edges": kept}
 
 
 def _merge_documents(
@@ -388,6 +415,8 @@ def _merge_documents(
             doc["obstacles"].extend(merged.get("obstacles") or [])
         elif target.slot in ("hud", "topology", "rules"):
             existing = doc.get(target.slot) or {}
+            if target.slot == "topology":
+                merged = _clean_edges(merged)
             doc[target.slot] = {**existing, **merged}
     return doc
 

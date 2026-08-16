@@ -184,6 +184,9 @@ class FixtureOutcome(BaseModel):
     wrong_auto_confirms: int = 0
     elapsed_ms: float = 0.0
     n_calls: int = 0
+    #: Individual model reads scored against truth, per model slug.
+    votes_by_model: dict[str, int] = Field(default_factory=dict)
+    votes_wrong_by_model: dict[str, int] = Field(default_factory=dict)
     errors: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -210,16 +213,51 @@ class PracticeReport(BaseModel):
     per_fixture: list[FixtureOutcome] = Field(default_factory=list)
     errors: dict[str, str] = Field(default_factory=dict)
 
+    # -- what produced these numbers ------------------------------------
+    #: The jury that read the boards, and who read the graph.
+    models: list[str] = Field(default_factory=list)
+    tie_breaker: str | None = None
+    topology_reader: str = "jury"
+    #: Share of *individual model reads* that disagreed with ground truth.  The
+    #: headline auto-confirm rate is only meaningful next to this: three readers
+    #: that never err agree on everything, and a 100% rate then measures the
+    #: pipeline rather than the models.
+    reader_error_rate: float = 0.0
+    per_model_error_rate: dict[str, float] = Field(default_factory=dict)
+
     @property
     def passed(self) -> bool:
         """A run passes only with zero wrong auto-confirms."""
         return self.wrong_auto_confirm_count == 0
 
+    def reader_line(self) -> str:
+        """One line naming what read the boards, so the headline is readable."""
+        who = ", ".join(self.models) or "unknown"
+        topo = "jury" if self.topology_reader == "jury" else f"single reader {self.topology_reader}"
+        tie = f", tie-breaker {self.tie_breaker}" if self.tie_breaker else ""
+        return f"  reader              {who} (topology: {topo}{tie})"
+
     def summary(self) -> str:
         lines = [
             f"practice: {self.puzzle_type}  fixtures={self.fixtures}",
-            f"  total latency   p50 {self.p50_total_ms:8.1f} ms   p90 {self.p90_total_ms:8.1f} ms",
+            self.reader_line(),
         ]
+        if self.reader_error_rate:
+            worst = sorted(self.per_model_error_rate.items(), key=lambda kv: -kv[1])
+            lines.append(
+                f"  reader error rate   {self.reader_error_rate:6.2%} of individual reads "
+                "disagreed with truth  ("
+                + "  ".join(f"{m} {r:.2%}" for m, r in worst)
+                + ")"
+            )
+        else:
+            lines.append(
+                "  reader error rate     0.00%  <-- a PERFECT reader: the rates below "
+                "measure the pipeline, not the models"
+            )
+        lines.append(
+            f"  total latency   p50 {self.p50_total_ms:8.1f} ms   p90 {self.p90_total_ms:8.1f} ms"
+        )
         for s in self.stages:
             lines.append(
                 f"  {s.stage:<22} p50 {s.p50_ms:8.1f} ms   p90 {s.p90_ms:8.1f} ms  (n={s.n})"
@@ -311,11 +349,25 @@ def score_fixture(
             )
         )
 
+    # Score each juror's own reads, so the auto-confirm rate can be read next to
+    # how often the readers actually erred.
+    votes: dict[str, int] = {}
+    votes_wrong: dict[str, int] = {}
+    for prov in result.provenance:
+        if prov.path not in truth:
+            continue
+        for model, value in prov.votes.items():
+            votes[model] = votes.get(model, 0) + 1
+            if not _same(value, truth[prov.path]):
+                votes_wrong[model] = votes_wrong.get(model, 0) + 1
+
     outcome = FixtureOutcome(
         fixture_id=fixture.fixture_id,
         fields_total=len(truth),
         fields_correct=correct,
         fields_missing=missing,
+        votes_by_model=votes,
+        votes_wrong_by_model=votes_wrong,
         auto_confirmed=len(result.auto_confirmed),
         disputed=len(result.disputed),
         wrong_auto_confirms=len(wrongs),
@@ -344,7 +396,13 @@ async def run_practice(
     """Replay ``fixture_dir`` through the full pipeline and grade the result."""
     fixtures = load_fixtures(fixture_dir, puzzle_type, limit=limit)
     roles_ = ExtractRoles.coerce(roles)
-    report = PracticeReport(puzzle_type=puzzle_type, fixtures=len(fixtures))
+    report = PracticeReport(
+        puzzle_type=puzzle_type,
+        fixtures=len(fixtures),
+        models=list(roles_.jury),
+        tie_breaker=roles_.tie_breaker,
+        topology_reader=roles_.topology or "jury",
+    )
     if not fixtures:
         report.errors["fixtures"] = f"no {puzzle_type} fixtures under {fixture_dir}"
         return report
@@ -399,6 +457,19 @@ async def run_practice(
     reviewed = report.auto_confirmed_count + report.disputed_count
     report.auto_confirm_rate = report.auto_confirmed_count / reviewed if reviewed else 0.0
     report.wrong_auto_confirm_count = len(report.wrong_auto_confirms)
+
+    votes: dict[str, int] = {}
+    wrong: dict[str, int] = {}
+    for fo in report.per_fixture:
+        for model, n in fo.votes_by_model.items():
+            votes[model] = votes.get(model, 0) + n
+        for model, n in fo.votes_wrong_by_model.items():
+            wrong[model] = wrong.get(model, 0) + n
+    report.per_model_error_rate = {
+        m: round(wrong.get(m, 0) / n, 6) for m, n in sorted(votes.items()) if n
+    }
+    total_votes = sum(votes.values())
+    report.reader_error_rate = (sum(wrong.values()) / total_votes) if total_votes else 0.0
     return report
 
 

@@ -250,6 +250,47 @@ def _tally(
     )
 
 
+def _answered_list(flat: dict[str, Any], prefix: str) -> bool:
+    """Did this model actually answer the question "what is in ``prefix``?"
+
+    True when it named at least one member, or said outright that the list is
+    empty.  False when it returned null -- that is "I could not read it", which
+    is an abstention, not a claim that the list is empty.
+    """
+    for path, value in flat.items():
+        if path == prefix or path.endswith(f".{prefix}"):
+            if isinstance(value, list):
+                return True
+        elif path.startswith(f"{prefix}[") or f".{prefix}[" in path:
+            return True
+    return False
+
+
+def _apply_set_semantics(
+    votes_by_path: dict[str, dict[str, Any]],
+    docs: dict[str, dict[str, Any]],
+    set_paths: Sequence[str],
+) -> None:
+    """Turn silence into a vote for list-shaped fields whose membership is the answer.
+
+    For an ordinary field, a model that did not mention a path abstained.  For a
+    *set* -- the edges of the graph -- naming three edges is also a statement
+    that there is no fourth.  Without this, two models reading ``M1->M2`` while
+    the third reads ``M1->M3`` would score as a two-voter *unanimous* edge and
+    auto-confirm, which is the single highest-consequence wrong answer on the
+    board: a flipped edge invalidates the whole solve while looking plausible.
+    """
+    for prefix in set_paths:
+        answered = [m for m, flat in docs.items() if _answered_list(flat, prefix)]
+        if len(answered) < 2:
+            continue
+        for path, votes in votes_by_path.items():
+            if not (path.startswith(f"{prefix}[") or f".{prefix}[" in path):
+                continue
+            for model in answered:
+                votes.setdefault(model, None)  # "I read the list; this is not in it"
+
+
 def _tie_break_messages(
     messages: Sequence[ChatMessage], split_paths: Sequence[str]
 ) -> list[ChatMessage]:
@@ -285,6 +326,7 @@ async def run_jury(
     tie_breaker: str | None = None,
     crop_id: str | None = None,
     normalizer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    set_paths: Sequence[str] = (),
     max_tokens: int | None = None,
 ) -> JuryResult:
     """Fire one crop at ``models`` concurrently and vote per field path.
@@ -292,6 +334,11 @@ async def run_jury(
     ``normalizer`` runs on each model's flattened document before voting; the
     topology call uses it to sort edges, so two models that list the same graph
     in a different order still vote on the same paths.
+
+    ``set_paths`` names list fields whose *membership* is the answer (``edges``).
+    For those, a model that answered the list but did not name a member is
+    recorded as voting "not present" rather than as abstaining -- see
+    :func:`_apply_set_semantics`.
     """
     t0 = time.perf_counter()
     docs, latency, errors = await _gather_votes(
@@ -309,6 +356,8 @@ async def run_jury(
     for model in models:  # stable, request-order columns
         for path, value in (docs.get(model) or {}).items():
             votes_by_path.setdefault(path, {})[model] = value
+    if set_paths:
+        _apply_set_semantics(votes_by_path, docs, set_paths)
 
     verdicts = [
         _tally(path, votes, len(models), crop_id)

@@ -25,7 +25,10 @@ from services.core.llm.protocol import LLMResponse, Usage
 from services.solvers.factory.model import FactoryState
 
 MODELS = ["famA/one", "famB/two", "famC/three"]
-ROLES = ExtractRoles(jury=MODELS, topology="famA/one", delta="famA/one")
+#: The default: the graph is juried like every tile.  ``topology=<model>``
+#: downgrades it to one cheap reader and is tested separately.
+ROLES = ExtractRoles(jury=MODELS, delta="famA/one")
+SINGLE_READER_TOPOLOGY = ExtractRoles(jury=MODELS, topology="famA/one", delta="famA/one")
 
 
 @pytest.fixture(autouse=True)
@@ -157,7 +160,7 @@ async def test_six_tiles_run_concurrently_not_serially(capsys):
             f"{ms:.0f} ms wall (serial would be {n_calls * 200} ms); "
             f"peak concurrency {client.max_concurrent}"
         )
-    assert n_calls == 6 * 3 + 3 + 1  # machines, hud jury, one topology call
+    assert n_calls == 8 * 3  # 6 machine tiles + hud + topology, three jurors each
     assert ms < 600.0
     assert ms < n_calls * 200 / 4  # nowhere near serial
     assert client.max_concurrent >= 10
@@ -205,8 +208,9 @@ async def test_assembles_into_factory_state_with_provenance_and_unresolved_field
 
     assert "machines[M2].output_max" in result.auto_confirmed
     assert result.auto_confirm_rate() > 0.5
-    # topology is a single cheap call, so it is never auto-confirmed
-    assert any(p.startswith("topology.") for p in result.disputed)
+    # the graph is juried like every tile, so an agreed graph costs no review
+    assert any(p.startswith("topology.") for p in result.auto_confirmed)
+    assert not any(p.startswith("topology.") for p in result.disputed)
     assert result.unresolved == []  # nothing the assembler needed was missing
 
 
@@ -341,6 +345,147 @@ async def test_builder_board_assembles_into_a_builder_puzzle():
 
 
 # --------------------------------------------------------------------------
+# topology: the highest-consequence read on the board
+# --------------------------------------------------------------------------
+
+
+def _edges_by_model(mapping: dict[str, list[tuple[str, str]]]):
+    def pick(model: str, hint: str):
+        return {"edges": [{"src": s, "dst": d} for s, d in mapping[model]]}
+
+    return pick
+
+
+async def test_a_unanimous_edge_set_auto_confirms():
+    client = SleepyClient(
+        0.0,
+        overrides={
+            "TopologyExtraction": _edges_by_model(
+                {m: [("M1", "M2"), ("M2", "M3")] for m in MODELS}
+            )
+        },
+    )
+    result = await extract(client, ROLES, [board(3)], "factory")
+
+    for path in ("topology.edges[M1->M2].src", "topology.edges[M2->M3].dst"):
+        prov = result.provenance_for(path)
+        assert prov.status == "unanimous" and prov.auto_confirmed
+        assert len(prov.votes) == 3
+    assert {(e.src, e.dst) for e in result.factory_state.edges} == {("M1", "M2"), ("M2", "M3")}
+    assert not [p for p in result.disputed if p.startswith("topology.")]
+
+
+async def test_a_disagreed_edge_is_disputed_not_auto_confirmed():
+    """The failure mode with the largest blast radius: a plausible wrong edge.
+
+    Two readers trace M1->M2, one traces M1->M3.  Nothing here may auto-confirm:
+    a flipped edge does not cost a verification round trip, it silently
+    invalidates the whole solve.
+    """
+    client = SleepyClient(
+        0.0,
+        overrides={
+            "TopologyExtraction": _edges_by_model(
+                {
+                    MODELS[0]: [("M1", "M2"), ("M2", "M3")],
+                    MODELS[1]: [("M1", "M2"), ("M2", "M3")],
+                    MODELS[2]: [("M1", "M3"), ("M2", "M3")],
+                }
+            )
+        },
+    )
+    result = await extract(client, ROLES, [board(3)], "factory")
+
+    # the contested edge two readers saw: a majority, so pre-filled but flagged
+    contested = result.provenance_for("topology.edges[M1->M2].dst")
+    assert contested.status == "majority" and contested.value == "M2"
+    assert contested.auto_confirmed is False
+    assert "topology.edges[M1->M2].dst" in result.disputed
+    # the third reader's silence is a vote, not an abstention
+    assert contested.votes[MODELS[2]] is None
+
+    # the edge only one reader saw: majority-null, dropped from the graph but
+    # still shown, with the crop, so the user can look
+    ghost = result.provenance_for("topology.edges[M1->M3].dst")
+    assert ghost.value is None and ghost.auto_confirmed is False
+    assert ghost.votes[MODELS[2]] == "M3"
+    assert ghost.crop_id and ghost.box["w"] > 0
+    assert ("M1", "M3") not in {(e.src, e.dst) for e in result.factory_state.edges}
+
+    # the edge everyone agreed on still costs nobody a keystroke
+    assert result.provenance_for("topology.edges[M2->M3].dst").auto_confirmed
+    assert not (set(result.auto_confirmed) & set(result.disputed))
+
+
+async def test_edge_voting_survives_models_tracing_the_graph_in_different_orders():
+    client = SleepyClient(
+        0.0,
+        overrides={
+            "TopologyExtraction": _edges_by_model(
+                {
+                    MODELS[0]: [("M1", "M2"), ("M2", "M3")],
+                    MODELS[1]: [("M2", "M3"), ("M1", "M2")],
+                    MODELS[2]: [("M2", "M3"), ("M1", "M2")],
+                }
+            )
+        },
+    )
+    result = await extract(client, ROLES, [board(3)], "factory")
+    assert not [p for p in result.disputed if p.startswith("topology.")]
+    assert {(e.src, e.dst) for e in result.factory_state.edges} == {("M1", "M2"), ("M2", "M3")}
+
+
+async def test_the_jury_catches_an_edge_the_single_reader_would_have_accepted():
+    """Why the jury is the default: the same misread, both ways.
+
+    ``famA/one`` reads an edge into a machine that does not exist.  Juried, two
+    readers contradict it and it never reaches the state.  As the sole topology
+    reader, it lands in the assembled graph with the wrong value pre-filled and
+    one keystroke standing between the user and a silently invalid solve.
+    """
+    overrides = {
+        "TopologyExtraction": _edges_by_model(
+            {
+                MODELS[0]: [("M1", "M9"), ("M2", "M3")],  # M9 does not exist
+                MODELS[1]: [("M1", "M2"), ("M2", "M3")],
+                MODELS[2]: [("M1", "M2"), ("M2", "M3")],
+            }
+        )
+    }
+    juried = await extract(SleepyClient(0.0, overrides=overrides), ROLES, [board(3)], "factory")
+    assert ("M1", "M9") not in {(e.src, e.dst) for e in juried.factory_state.edges}
+    assert ("M1", "M2") in {(e.src, e.dst) for e in juried.factory_state.edges}
+    assert not [p for p in juried.provenance if p.value == "M9"]
+
+    board2 = board(3)
+    board2.capture_id = "cap_single"
+    alone = await extract(
+        SleepyClient(0.0, overrides=overrides), SINGLE_READER_TOPOLOGY, [board2], "factory"
+    )
+    assert ("M1", "M9") in {(e.src, e.dst) for e in alone.factory_state.edges}
+    assert [p.path for p in alone.provenance if p.value == "M9"] == [
+        "topology.edges[M1->M9].dst"
+    ]
+
+
+async def test_topology_can_be_downgraded_to_one_cheap_reader():
+    """``ExtractRoles.topology`` trades the consensus for two calls of tokens.
+
+    One reader is never a confirmation, so every edge stays flagged.
+    """
+    client = SleepyClient(0.0)
+    result = await extract(client, SINGLE_READER_TOPOLOGY, [board(3)], "factory")
+
+    topo_calls = [c for c in client.calls if c[1].startswith("TopologyExtraction")]
+    assert len(topo_calls) == 1 and topo_calls[0][0] == "famA/one"
+    assert len(client.calls) == 3 * 3 + 3 + 1
+    assert not any(p.startswith("topology.") for p in result.auto_confirmed)
+    assert any(p.startswith("topology.") for p in result.disputed)
+    # the graph still assembles: it is flagged, not discarded
+    assert {(e.src, e.dst) for e in result.factory_state.edges} == {("M1", "M2"), ("M2", "M3")}
+
+
+# --------------------------------------------------------------------------
 # speculation
 # --------------------------------------------------------------------------
 
@@ -348,7 +493,7 @@ async def test_builder_board_assembles_into_a_builder_puzzle():
 async def test_speculation_starts_early_and_extract_awaits_the_same_work(capsys):
     client = SleepyClient(120.0)
     cap = board(2)
-    calls_per_pass = 2 * 3 + 3 + 1  # 2 machine juries + hud jury + topology
+    calls_per_pass = 4 * 3  # 2 machine tiles + hud + topology, three jurors each
 
     task = speculate(client, ROLES, cap, "factory")
     await asyncio.sleep(0.04)  # the user is still reaching for the hotkey
@@ -384,7 +529,7 @@ async def test_speculating_twice_reuses_the_in_flight_task():
     b = speculate(client, ROLES, cap, "factory")
     assert a is b
     await a
-    assert len(client.calls) == 2 * 3 + 3 + 1
+    assert len(client.calls) == 4 * 3
 
 
 async def test_a_different_capture_is_not_served_from_the_cache():
