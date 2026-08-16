@@ -28,6 +28,7 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.core.capture.grab import Capture, Rect, Tile, capture_from_image
+from services.core import atomic
 from services.core.paths import SESSION_ROOT
 
 #: Anchored to the repo root, not the CWD: on Windows the app is usually
@@ -64,6 +65,17 @@ class CaptureMeta(BaseModel):
     grab_ms: float = 0.0
     tiles: list[dict[str, Any]] = Field(default_factory=list)
     notes: dict[str, Any] = Field(default_factory=dict)
+    #: Problems the grab itself noticed — most importantly a blank frame, which
+    #: on Windows means the game is in exclusive fullscreen (or is excluded from
+    #: capture) and every field extracted from this PNG would be invented. This
+    #: is first-class rather than a note because the UI has to surface it: a
+    #: black capture that looks like a normal thumbnail is how a run gets lost.
+    warnings: list[str] = Field(default_factory=list)
+    #: Title of the window this came from, when it was a per-window grab.
+    window: str | None = None
+
+    def is_blank(self) -> bool:
+        return any("blank" in w.lower() or "black" in w.lower() for w in self.warnings)
 
     @model_validator(mode="after")
     def _sync_id(self) -> "CaptureMeta":
@@ -92,7 +104,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        atomic.replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -158,6 +170,8 @@ class CaptureStore:
             grab_ms=capture.grab_ms,
             tiles=[t.as_dict() for t in capture.tiles],
             notes=notes or {},
+            warnings=list(getattr(capture, "warnings", []) or []),
+            window=getattr(capture, "window", None),
         )
         # Pixels first: a sidecar that names a missing PNG is the one
         # inconsistency a reader cannot recover from.

@@ -342,6 +342,13 @@ def _windows_acl_is_restricted(path: Path) -> bool:
     0 and still leave an inherited ACE behind if the ``/inheritance:r`` half was
     refused, and an inherited ACE from ``C:\\Users\\Public``-style ancestry is
     exactly the case that leaves the key world-readable.
+
+    The primary test is a **count**: after a successful lockdown there is
+    exactly one ACE and it is ours.  Counting rather than blacklisting is what
+    makes this work on a localized Windows, where the group we most need to
+    exclude is not spelled "Everyone" -- it is "Jeder", "Tout le monde",
+    "Todos".  :data:`_ACL_FORBIDDEN` stays as a second line of defence for the
+    English case; it is not load-bearing on its own.
     """
     principal = _windows_principal()
     if not principal:
@@ -352,26 +359,32 @@ def _windows_acl_is_restricted(path: Path) -> bool:
         return False
     if proc.returncode != 0:
         return False
-    bare = principal.split("\\")[-1].lower()
-    saw_owner = False
+
+    aces: list[str] = []
     for line in (proc.stdout or "").splitlines():
         text = line.strip()
         if not text or text.lower().startswith("successfully processed"):
             continue
-        # The first line is "<path> <ACE>"; strip the path off it.
+        # The first line is "<path> <ACE>"; strip the path off it.  Subsequent
+        # ACEs are indented continuation lines with no path.
         ace = text[len(str(path)):].strip() if text.startswith(str(path)) else text
-        if not ace:
-            continue
-        low = ace.lower()
-        if "(i)" in low:  # an inherited ACE means /inheritance:r did not take
-            return False
-        if any(bad in low for bad in _ACL_FORBIDDEN):
-            return False
-        # An ACE reads ``DOMAIN\name:(F)``; requiring the colon stops a short
-        # username matching as a substring of some other principal's name.
-        if f"{bare}:" in low or f"{principal.lower()}:" in low:
-            saw_owner = True
-    return saw_owner
+        if ace:
+            aces.append(ace)
+
+    if len(aces) != 1:
+        # Zero means we could not read it; more than one means somebody else is
+        # still on the ACL, whatever their name happens to be in this locale.
+        return False
+
+    low = aces[0].lower()
+    if "(i)" in low:  # an inherited ACE means /inheritance:r did not take
+        return False
+    if any(bad in low for bad in _ACL_FORBIDDEN):
+        return False
+    # An ACE reads ``DOMAIN\name:(F)``; requiring the colon stops a short
+    # username matching as a substring of some other principal's name.
+    bare = principal.split("\\")[-1].lower()
+    return f"{bare}:" in low or f"{principal.lower()}:" in low
 
 
 def _fallback_protection() -> str:

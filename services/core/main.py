@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from services.core.paths import DATA_ROOT
 from services.core.session import LeaderboardEntry, SessionState, sessions
 from services.solvers.runtime.worker import JobMessage, manager
 
@@ -212,6 +213,30 @@ def api_captures(session_id: str) -> dict[str, Any]:
     return {"captures": items}
 
 
+async def _announce_capture(session: SessionState, meta: Any) -> dict[str, Any]:
+    """Push a new capture to the UI, loudly if the frame came back blank.
+
+    A blank grab means the game is in exclusive fullscreen (or is excluded from
+    capture) and every field extracted from it would be invented. It must not
+    arrive looking like an ordinary thumbnail, and it must not be fed to the
+    extractor: speculating on a black frame spends three model calls to produce
+    confident nonsense.
+    """
+    payload = meta.model_dump(mode="json")
+    payload["thumb_url"] = f"/api/captures/{meta.id}/thumb"
+    payload["image_url"] = f"/api/captures/{meta.id}/image"
+    blank = bool(getattr(meta, "warnings", None)) and meta.is_blank()
+    await hub.send(session.id, {"type": "capture", "capture": payload})
+    if blank:
+        await hub.send(
+            session.id,
+            {"type": "warning", "text": " ".join(meta.warnings), "capture_id": meta.id},
+        )
+    else:
+        asyncio.create_task(_speculate(session, meta.id))
+    return {"capture_id": meta.id, "warnings": list(getattr(meta, "warnings", []) or [])}
+
+
 @app.post("/api/captures/monitor")
 async def api_capture_monitor(body: dict[str, Any] = Body(...)) -> Any:
     session = _require(body["session_id"])
@@ -223,11 +248,7 @@ async def api_capture_monitor(body: dict[str, Any] = Body(...)) -> Any:
         meta = store.save(cap, session_id=session.id, puzzle_type=session.puzzle_type)
     except Exception as exc:
         return _err(503, f"capture unavailable: {exc}")
-    payload = meta.model_dump(mode="json")
-    payload["thumb_url"] = f"/api/captures/{meta.id}/thumb"
-    await hub.send(session.id, {"type": "capture", "capture": payload})
-    asyncio.create_task(_speculate(session, meta.id))
-    return {"capture_id": meta.id}
+    return await _announce_capture(session, meta)
 
 
 @app.post("/api/captures/region")
@@ -241,11 +262,7 @@ async def api_capture_region(body: dict[str, Any] = Body(...)) -> Any:
         meta = store.save(cap, session_id=session.id, puzzle_type=session.puzzle_type)
     except Exception as exc:
         return _err(503, f"capture unavailable: {exc}")
-    payload = meta.model_dump(mode="json")
-    payload["thumb_url"] = f"/api/captures/{meta.id}/thumb"
-    await hub.send(session.id, {"type": "capture", "capture": payload})
-    asyncio.create_task(_speculate(session, meta.id))
-    return {"capture_id": meta.id}
+    return await _announce_capture(session, meta)
 
 
 @app.post("/api/captures/upload")
@@ -261,10 +278,7 @@ async def api_capture_upload(body: dict[str, Any] = Body(...)) -> Any:
         )
     except Exception as exc:
         return _err(503, f"capture store unavailable: {exc}")
-    payload = meta.model_dump(mode="json")
-    payload["thumb_url"] = f"/api/captures/{meta.id}/thumb"
-    await hub.send(session.id, {"type": "capture", "capture": payload})
-    return {"capture_id": meta.id}
+    return await _announce_capture(session, meta)
 
 
 @app.get("/api/captures/{capture_id}/image")
@@ -393,7 +407,7 @@ async def api_confirm(session_id: str, body: dict[str, Any] = Body(default={})) 
 #: Corrections to fields the jury auto-confirmed.  Spec 13 calls every one of
 #: these a P0 extraction bug whose fixture goes into the test set permanently,
 #: so they are appended to a file rather than only logged and forgotten.
-REGRESSION_LOG = Path("data") / "extraction_regressions.jsonl"
+REGRESSION_LOG = DATA_ROOT / "extraction_regressions.jsonl"
 
 
 def _record_auto_confirm_corrections(s: SessionState, patch: dict[str, Any]) -> list[dict[str, Any]]:
@@ -421,7 +435,10 @@ def _record_auto_confirm_corrections(s: SessionState, patch: dict[str, Any]) -> 
     if hits:
         try:
             REGRESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
-            with REGRESSION_LOG.open("a") as fh:
+            # UTF-8 explicitly: this line carries jury values and the human's
+            # correction, which is exactly the text most likely to leave ASCII,
+            # and it is on the confirm path where a raise would cost the run.
+            with REGRESSION_LOG.open("a", encoding="utf-8") as fh:
                 for h in hits:
                     fh.write(json.dumps(h, default=str) + "\n")
         except OSError as exc:  # never let bookkeeping break the confirm path
@@ -722,21 +739,41 @@ async def api_set_models(body: dict[str, Any] = Body(...)) -> Any:
 
 @app.post("/api/settings/key")
 async def api_set_key(body: dict[str, Any] = Body(...)) -> Any:
-    try:
-        from services.core.settings.keys import storage_backend, store_key, validate_key
+    """Validate a key, then store it.
 
+    This called ``store_key`` with one argument where it takes two, and read a
+    ``remaining_credit`` attribute that ``KeyInfo`` does not have.  Both raised,
+    and the broad ``except`` below turned both into a 503 that blamed
+    validation — so pasting a key had never once worked through the UI, and the
+    error pointed away from the fault.  The narrow excepts are the actual fix:
+    a bug in this handler must not disguise itself as an upstream outage.
+    """
+    from services.core.settings.keys import (
+        KeyStorageError,
+        storage_backend,
+        store_key,
+        validate_key,
+    )
+
+    try:
         info = await validate_key(body["key"])
-        if not info.valid:
-            return {"valid": False, "error": info.error}
-        store_key(body["key"])
-        return {
-            "valid": True,
-            "label": info.label,
-            "remaining_credit": info.remaining_credit,
-            "backend": storage_backend(),
-        }
     except Exception as exc:
-        return _err(503, f"key validation unavailable: {exc}")
+        return _err(503, f"could not reach OpenRouter to validate the key: {exc}")
+    if not info.valid:
+        return {"valid": False, "error": info.error}
+
+    try:
+        store_key(body["key"], info)
+    except KeyStorageError as exc:
+        # The key is good but we refuse to write it somewhere unprotected.
+        return _err(500, str(exc))
+
+    return {
+        "valid": True,
+        "label": info.label,
+        "remaining_credit": info.remaining,
+        "backend": storage_backend(),
+    }
 
 
 @app.get("/api/health")
@@ -839,4 +876,12 @@ def main() -> None:  # pragma: no cover
 
 
 if __name__ == "__main__":  # pragma: no cover
+    # freeze_support() has to be the FIRST thing in the entry module under a
+    # frozen build: PyInstaller creates a child by re-executing the bundled exe,
+    # and without this that child re-runs the whole server instead of the worker
+    # — forking a fresh app per solve until the machine gives up. Harmless when
+    # not frozen.
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     main()

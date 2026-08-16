@@ -130,3 +130,82 @@ def test_correcting_an_auto_confirmed_field_is_recorded_as_a_p0(client, tmp_path
     assert rows[0]["jury_value"] == 4 and rows[0]["corrected_value"] == 6
     assert rows[0]["crop"]["capture_id"] == "cap_x"
     assert rows[0]["votes"] == {"a/1": 4, "b/2": 4, "c/3": 4}
+
+
+def test_a_blank_capture_warns_and_is_not_extracted(client, tmp_path, monkeypatch):
+    """A black frame means the game is in exclusive fullscreen (or excluded from
+    capture). It must not arrive looking like an ordinary thumbnail, and it must
+    not be fed to the extractor — speculating on it spends three model calls to
+    produce confident nonsense."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    import services.core.main as main_mod
+
+    speculated: list[str] = []
+
+    async def spy(session, capture_id):
+        speculated.append(capture_id)
+
+    monkeypatch.setattr(main_mod, "_speculate", spy)
+
+    buf = io.BytesIO()
+    Image.new("RGB", (320, 200), (0, 0, 0)).save(buf, format="PNG")
+    sid = client.post("/api/sessions", json={"puzzle_type": "factory"}).json()["id"]
+
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        r = client.post(
+            "/api/captures/upload",
+            json={"session_id": sid, "image_base64": base64.b64encode(buf.getvalue()).decode()},
+        )
+        assert r.status_code == 200
+        assert r.json()["warnings"], "a black frame was stored with no warning"
+        kinds = [json.loads(ws.receive_text())["type"] for _ in range(2)]
+
+    assert kinds == ["capture", "warning"]
+    assert not speculated, "extraction was started on a blank frame"
+
+
+def test_pasting_a_key_actually_stores_it(client, monkeypatch, tmp_path):
+    """This endpoint had never worked: it called store_key with the wrong arity
+    and read an attribute KeyInfo does not have, and a broad except turned both
+    into a 503 blaming validation. A bug in the handler must not disguise itself
+    as an upstream outage."""
+    import services.core.settings.keys as keys_mod
+
+    stored: dict[str, object] = {}
+
+    async def fake_validate(key, **kw):
+        return keys_mod.KeyInfo(valid=True, label="test key", limit=10.0, usage=2.5)
+
+    monkeypatch.setattr(keys_mod, "validate_key", fake_validate)
+    monkeypatch.setattr(keys_mod, "store_key", lambda k, i: stored.update(key=k, info=i))
+    monkeypatch.setattr(keys_mod, "storage_backend", lambda: "keyring:Fake")
+
+    r = client.post("/api/settings/key", json={"key": "sk-or-v1-" + "a" * 32})
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert body["valid"] is True and body["backend"] == "keyring:Fake"
+    assert body["remaining_credit"] == 7.5
+    assert stored["key"].startswith("sk-or-v1-")
+
+
+def test_a_refused_unprotected_store_is_not_reported_as_an_outage(client, monkeypatch):
+    """On Windows the fallback refuses to write an unprotected key file. That is
+    a 500 about storage, not a 503 about OpenRouter being unreachable."""
+    import services.core.settings.keys as keys_mod
+
+    async def fake_validate(key, **kw):
+        return keys_mod.KeyInfo(valid=True, label="k")
+
+    def refuse(key, info):
+        raise keys_mod.KeyStorageError("could not restrict the ACL; refusing to store")
+
+    monkeypatch.setattr(keys_mod, "validate_key", fake_validate)
+    monkeypatch.setattr(keys_mod, "store_key", refuse)
+
+    r = client.post("/api/settings/key", json={"key": "sk-or-v1-" + "b" * 32})
+    assert r.status_code == 500
+    assert "refusing to store" in r.json()["error"]

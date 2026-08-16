@@ -33,6 +33,7 @@ import base64
 import ctypes
 import hashlib
 import io
+import logging
 import os
 import sys
 import threading
@@ -43,6 +44,8 @@ from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 from PIL import Image
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
 # Budgets (spec 6.1).  Exported so tests and the practice harness agree.
@@ -367,12 +370,34 @@ def ensure_dpi_awareness(*, force: bool = False) -> str:
     one-shot, so a second attempt -- ours or another library's -- reports
     ERROR_ACCESS_DENIED / E_ACCESSDENIED.  That means somebody already made the
     process aware, which is the outcome we wanted.
+
+    Interaction with mss (checked against mss 10.2, ``mss/windows/gdi.py``):
+    ``MSS.__init__`` itself calls ``shcore.SetProcessDpiAwareness(2)`` -- only
+    per-monitor **v1** -- and then immediately ``GetWindowDC(0)``.  It ignores
+    the HRESULT, so our earlier v2 claim makes mss's call a silent no-op rather
+    than the other way round; that ordering is the one we want and it is why
+    this runs at import.  It also means the bug this fixes is not "mss captures
+    at the wrong resolution" -- mss would have rescued itself at the moment the
+    first ``MSS()`` was constructed -- but everything that happens *before*
+    that first construction: window rects, ``GetDpiForMonitor``, monitor
+    enumeration, and any region-picker overlay the UI puts on screen.  Those
+    would be virtualised, and a crop box computed from a virtualised rect is
+    wrong against a physical-pixel screenshot.
     """
     global _dpi_level
     with _dpi_lock:
         if _dpi_level is not None and not force:
             return _dpi_level
         _dpi_level = _apply_dpi_awareness()
+        if _dpi_level in ("unaware", "system"):
+            # Loud, because the symptom otherwise is "the crops are subtly off"
+            # rather than any kind of error.
+            log.warning(
+                "DPI awareness is %r: Windows is showing this process a virtualised "
+                "desktop, so capture rects on scaled monitors will be wrong. Expected "
+                "'per_monitor_v2'. Another component may have claimed awareness first.",
+                _dpi_level,
+            )
         return _dpi_level
 
 
@@ -502,10 +527,41 @@ def display_available() -> bool:
         os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
     ):
         return False
+    if sys.platform == "win32" and not _windows_has_interactive_desktop():
+        return False
     try:
         import mss  # noqa: F401
     except Exception:
         return False
+    return True
+
+
+def _windows_has_interactive_desktop() -> bool:
+    """Is there a real, connected desktop to capture?
+
+    ``mss`` imports fine under a service account or a disconnected RDP session
+    and then hands back black frames or fails at grab time.  Session 0 is the
+    non-interactive services session, and ``GetSystemMetrics(SM_REMOTESESSION)``
+    plus a zero-sized virtual screen catch the disconnected-console case.  Being
+    told "no desktop" beats being handed a black screenshot that looks real.
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        session_id = ctypes.c_ulong()
+        if kernel32.ProcessIdToSessionId(kernel32.GetCurrentProcessId(), ctypes.byref(session_id)):
+            if session_id.value == 0:
+                return False  # services session: no interactive desktop, ever
+        SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+        if not (user32.GetSystemMetrics(SM_CXVIRTUALSCREEN) and
+                user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)):
+            return False
+    except Exception:
+        # An unexpected ctypes failure is not evidence of no desktop; let the
+        # grab itself be the judge rather than disabling capture outright.
+        return True
     return True
 
 
@@ -745,11 +801,17 @@ def capture_from_image(
     capture_id: str | None = None,
     tiles: Sequence["Tile"] | None = None,
     source: str = "file",
+    check_blank: bool = True,
 ) -> Capture:
-    """Wrap an in-memory image as a :class:`Capture` (fixtures, replay, tests)."""
+    """Wrap an in-memory image as a :class:`Capture` (fixtures, replay, tests).
+
+    The blank-frame check runs here too, not only on the live grab path: an
+    uploaded or replayed black PNG is exactly as useless to extract from, and
+    this is the single funnel every not-grabbed-just-now image passes through.
+    """
     rect = Rect.coerce(region) if region is not None else Rect(0, 0, image.width, image.height)
     kwargs = {} if capture_id is None else {"capture_id": capture_id}
-    return Capture(
+    cap = Capture(
         image=image,
         region=rect,
         scale=scale,
@@ -760,6 +822,9 @@ def capture_from_image(
         source=source,
         **kwargs,
     )
+    if check_blank and looks_blank(image):
+        cap.warnings.append(BLANK_FRAME_WARNING)
+    return cap
 
 
 def _grab_box(

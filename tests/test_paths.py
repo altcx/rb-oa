@@ -35,3 +35,60 @@ def test_capture_store_default_is_anchored_too():
 
     assert Path(DEFAULT_ROOT) == SESSION_ROOT
     assert Path(DEFAULT_ROOT).is_absolute()
+
+
+def test_atomic_replace_retries_when_a_reader_holds_the_file(monkeypatch, tmp_path):
+    """os.replace onto a path another handle has open succeeds on POSIX and
+    raises PermissionError on Windows. Two concurrent thumbnail requests hit
+    exactly that, and only on the target platform."""
+    import os as _os
+
+    from services.core import atomic
+
+    dst = tmp_path / "target.json"
+    dst.write_text("old", encoding="utf-8")
+    calls = {"n": 0}
+    real = _os.replace
+
+    def flaky(src, target):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError(5, "The process cannot access the file")
+        real(src, target)
+
+    monkeypatch.setattr(_os, "replace", flaky)
+    monkeypatch.setattr(atomic, "_BACKOFF_S", 0.001)
+    atomic.write_text(dst, "new")
+    assert dst.read_text(encoding="utf-8") == "new"
+    assert calls["n"] == 3
+
+
+def test_atomic_replace_gives_up_rather_than_hanging(monkeypatch, tmp_path):
+    import os as _os
+
+    from services.core import atomic
+
+    def always_locked(src, target):
+        raise PermissionError(5, "locked")
+
+    monkeypatch.setattr(_os, "replace", always_locked)
+    monkeypatch.setattr(atomic, "_BACKOFF_S", 0.001)
+    try:
+        atomic.write_text(tmp_path / "x.json", "data")
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("a permanently locked file must surface, not hang")
+
+
+def test_text_round_trips_non_ascii(tmp_path):
+    """Windows text mode defaults to the ANSI code page, so a machine label a
+    vision model read off the screen would round-trip wrong without an explicit
+    encoding."""
+    import json as _json
+
+    from services.core import atomic
+
+    payload = {"machine": "Schmelzofen No3 №", "note": "café — 25%"}
+    atomic.write_json(tmp_path / "s.json", payload)
+    assert _json.loads(atomic.read_text(tmp_path / "s.json")) == payload

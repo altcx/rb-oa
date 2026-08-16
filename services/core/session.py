@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from services.core import atomic
 from services.core.paths import DATA_ROOT, SESSION_ROOT  # noqa: E402  (re-exported)
 
 __all__ = ["DATA_ROOT", "SESSION_ROOT", "SessionState", "SessionManager", "LeaderboardEntry"]
@@ -114,9 +115,7 @@ class SessionState(BaseModel):
     def save(self) -> None:
         d = self.dir()
         d.mkdir(parents=True, exist_ok=True)
-        tmp = d / "session.json.tmp"
-        tmp.write_text(json.dumps(self.model_dump(mode="json"), indent=2))
-        os.replace(tmp, d / "session.json")
+        atomic.write_json(d / "session.json", self.model_dump(mode="json"))
 
     @classmethod
     def load(cls, session_id: str) -> "SessionState | None":
@@ -124,7 +123,7 @@ class SessionState(BaseModel):
         if not p.exists():
             return None
         try:
-            return cls.model_validate_json(p.read_text())
+            return cls.model_validate_json(atomic.read_text(p))
         except Exception:
             return None
 

@@ -200,6 +200,14 @@ EVERYONE = (
     "\nSuccessfully processed 1 files; Failed processing 0 files\n"
 )
 SOMEONE_ELSE = "{path} DESKTOP-1\\otheruser:(F)\n\nSuccessfully processed 1 files\n"
+#: German Windows spells the Everyone group "Jeder".  A name blacklist would
+#: wave this through; counting ACEs does not.
+LOCALIZED_EVERYONE = (
+    "{path} Jeder:(F)\n"
+    "        DESKTOP-1\\puzzler:(F)\n"
+    "\nSuccessfully processed 1 files; Failed processing 0 files\n"
+)
+NOTHING_READABLE = "\nSuccessfully processed 0 files; Failed processing 1 files\n"
 
 
 def _icacls_returning(text: str, path: Path, returncode: int = 0):
@@ -223,8 +231,17 @@ def _icacls_returning(text: str, path: Path, returncode: int = 0):
         (STILL_INHERITED, False),
         (EVERYONE, False),
         (SOMEONE_ELSE, False),
+        (LOCALIZED_EVERYONE, False),
+        (NOTHING_READABLE, False),
     ],
-    ids=["locked-down", "inheritance-not-removed", "everyone-can-read", "not-our-account"],
+    ids=[
+        "locked-down",
+        "inheritance-not-removed",
+        "everyone-can-read",
+        "not-our-account",
+        "localized-everyone-group",
+        "no-ace-readable",
+    ],
 )
 def test_acl_readback_only_accepts_a_lone_owner_ace(tmp_path, monkeypatch, output, expected):
     monkeypatch.setenv("USERNAME", "puzzler")
