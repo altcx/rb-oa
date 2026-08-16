@@ -308,7 +308,14 @@ def _windows_principal() -> str:
 
 
 def _run_icacls(args: list[str]) -> subprocess.CompletedProcess:
-    kwargs: dict[str, Any] = dict(capture_output=True, text=True, shell=False, timeout=20)
+    # ``shell=False`` matters: the secrets directory sits under the repo path,
+    # which can contain spaces, and a shell would re-split it.  ``errors``
+    # matters because icacls prints account names in the console code page and
+    # a non-ASCII group name must degrade to a replacement character rather
+    # than raise UnicodeDecodeError inside a security check.
+    kwargs: dict[str, Any] = dict(
+        capture_output=True, text=True, errors="replace", shell=False, timeout=20
+    )
     flag = getattr(subprocess, "CREATE_NO_WINDOW", None)
     if flag:
         kwargs["creationflags"] = flag
@@ -360,7 +367,9 @@ def _windows_acl_is_restricted(path: Path) -> bool:
             return False
         if any(bad in low for bad in _ACL_FORBIDDEN):
             return False
-        if bare in low or principal.lower() in low:
+        # An ACE reads ``DOMAIN\name:(F)``; requiring the colon stops a short
+        # username matching as a substring of some other principal's name.
+        if f"{bare}:" in low or f"{principal.lower()}:" in low:
             saw_owner = True
     return saw_owner
 
