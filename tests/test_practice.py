@@ -186,24 +186,24 @@ async def test_an_illegible_crop_produces_nulls_rather_than_guesses(fixtures_dir
     assert m1, "the M1 tile must still appear"
     assert all(p.value is None for p in m1), "an illegible crop must not be guessed at"
     assert all(p.status == "unanimous" for p in m1)
-    # the fields the solver needs are held back for a human...
-    needed = [p for p in m1 if p.path.endswith((".id", ".kind"))]
-    assert needed and all(not p.auto_confirmed for p in needed)
-    assert all(p.path in result.unresolved for p in needed)
-    # ...and the rest are simply absent, costing nobody a keystroke
-    assert any(p.auto_confirmed for p in m1)
+    # nothing on an unreadable panel is confirmed as "absent": the id is gone,
+    # so the whole record is unknown and the whole record goes to review
+    assert not any(p.auto_confirmed for p in m1)
+    assert all(p.path in result.unresolved for p in m1)
+    # the blast radius is one panel: its legible neighbours still auto-confirm
+    assert sum(1 for p in result.provenance if p.tile == "M2" and p.auto_confirmed) >= 5
     # the assembler reports the hole rather than inventing a machine
     assert result.factory_state is not None
     assert "M1" not in [m.id for m in result.factory_state.machines]
     assert any("id_or_kind" in u for u in result.unresolved)
 
-    # Practice mode still calls this out, and should: a field that WAS on the
-    # screen and that nobody could read is a real alarm before the clock starts.
-    # What matters is that the alarm is about nulls, never about invented values.
-    _, wrongs = score_fixture(fixtures[0], result)
-    assert wrongs, "an unreadable crop must not pass practice silently"
-    assert all(w.confirmed is None for w in wrongs), "practice saw a fabricated value"
-    assert all(w.tile == "M1" for w in wrongs)  # scoped to the illegible crop
+    # Practice grades this as lost accuracy and extra review load -- not as a
+    # wrong auto-confirm.  Nothing was confirmed, so nothing was confirmed
+    # wrongly; the hard failure stays reserved for confidently wrong values.
+    outcome, wrongs = score_fixture(fixtures[0], result)
+    assert wrongs == []
+    assert outcome.fields_correct < outcome.fields_total
+    assert outcome.disputed >= len(m1) - len(result.auto_confirmed)
 
 
 # --------------------------------------------------------------------------
