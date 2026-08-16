@@ -134,7 +134,15 @@ P0 extraction bug whose fixture goes into the test set permanently.
 
 The optimizer refuses to run (HTTP 412) until at least one recorded game run
 matches the simulator to the dollar. On mismatch, `calibrate.py` re-simulates
-under every combination of the eight unresolved factory flags and reports which
+under every combination of the unresolved factory flags and reports which
 combinations reproduce the observed series. The override exists, behind an
 explicit flag and a loud warning, because the alternative — a simulator that
 silently diverges from the game — is the failure mode that wastes a whole run.
+
+There are nine flags, not the eight the spec lists. The ninth,
+`full_storage_behavior`, came out of writing the simulator: a machine whose
+storage is full either idles or keeps producing into a full buffer and destroys
+the output, and the second case burns inputs and production cost for nothing.
+The simulator cannot avoid taking a position on it, so it is a flag with an
+experiment attached rather than an assumption in a comment. That is the rule the
+whole design follows — an unstated rule you had to guess is a flag, not a note.

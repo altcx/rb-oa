@@ -134,6 +134,9 @@ def test_optimizer_streams_improvements_before_it_finishes():
     print(f"\non_improve fired {len(stamps)} times, first at {stamps[0] if stamps else float('nan'):.3f}s")
     assert stamps, "the optimizer never reported a best-so-far"
     assert stamps[0] < 1.0, "first improvement arrived too late to be an anytime result"
+    # One callback at t=0 and then silence is not an anytime stream: the user is
+    # told to wait with no way to judge whether waiting is worth it.
+    assert len(stamps) >= 3, f"only {len(stamps)} progress callbacks in 1.5s"
 
 
 def test_builder_realistic_instance_under_ten_seconds():
