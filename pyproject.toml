@@ -1,0 +1,51 @@
+[project]
+name = "puzzle-copilot"
+version = "2.0.0"
+description = "Real-time copilot for timed optimization puzzles. Reads the screen, solves deterministically, narrates."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13",
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "ortools>=9.11",
+    "pillow>=10.4",
+    "mss>=9.0",
+    "pynput>=1.7",
+    "keyring>=25.4",
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+    "respx>=0.21",
+    "hypothesis>=6.112",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["services"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "latency: latency budget tests (spec section 6)",
+    "slow: takes more than a few seconds",
+    "network: requires a live OpenRouter key",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
