@@ -550,7 +550,7 @@ async def api_leaderboard_add(session_id: str, body: dict[str, Any] = Body(...))
 @app.get("/api/settings/models")
 async def api_models() -> Any:
     try:
-        from services.core.settings.models import catalog_and_roles
+        from services.core.wiring import catalog_and_roles
 
         return await catalog_and_roles()
     except Exception as exc:
@@ -560,7 +560,7 @@ async def api_models() -> Any:
 @app.post("/api/settings/models")
 async def api_set_models(body: dict[str, Any] = Body(...)) -> Any:
     try:
-        from services.core.settings.models import save_roles
+        from services.core.wiring import save_roles
 
         save_roles(body["roles"])
     except Exception as exc:
@@ -628,16 +628,43 @@ async def _run_agent(session_id: str, text: str) -> None:
     if s is None:
         return
     try:
-        from services.core.agent.loop import build_session
+        from services.core.wiring import build_agent_session, event_to_ws
     except Exception as exc:
         await hub.send(session_id, {"type": "warning", "text": f"agent unavailable: {exc}"})
         return
+    s.chat.append({"role": "user", "text": text, "at": time.time()})
+    final = ""
     try:
-        agent = await build_session(s)
+        agent = await build_agent_session(s)
         async for event in agent.run(text):
-            await hub.send(session_id, event.to_ws() if hasattr(event, "to_ws") else dict(event))
+            if event.kind == "tool_call_finished" and event.result is not None:
+                s.tool_results.append({"tool": event.tool, "result": event.result})
+            if event.kind == "done":
+                final = event.text
+            await hub.send(session_id, event_to_ws(event))
     except Exception as exc:
         await hub.send(session_id, {"type": "warning", "text": f"agent error: {exc}"})
+        return
+    # Spec 13: the agent must never narrate a number it made up.
+    try:
+        from services.core.agent.guard import unsourced_numbers
+
+        offenders = unsourced_numbers(final, s.tool_results, [text])
+        if offenders:
+            log.warning("unsourced numbers in agent output: %s", offenders)
+            await hub.send(
+                session_id,
+                {
+                    "type": "provenance_warning",
+                    "numbers": offenders,
+                    "text": "these numbers do not appear in any tool result from this conversation",
+                },
+            )
+    except Exception:
+        pass
+    s.chat.append({"role": "assistant", "text": final, "at": time.time()})
+    s.cost_spent = getattr(agent, "spent", s.cost_spent)
+    sessions.save(s)
 
 
 # -- static web app ---------------------------------------------------------
