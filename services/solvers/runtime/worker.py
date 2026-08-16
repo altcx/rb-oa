@@ -151,6 +151,10 @@ def _dump(obj: Any) -> Any:
 
 
 def _child_main(cmd_q: Any, out_q: Any) -> None:  # pragma: no cover - runs in a child
+    # Windows uses ``spawn``, and a frozen build (the PyInstaller sidecar the
+    # spec plans for phase B) re-executes the bundled exe to create a child.
+    # Without this, that child re-runs the whole app instead of the worker.
+    mp.freeze_support()
     _warm_imports()
     out_q.put(JobMessage(job_id="", type="ready"))
     while True:
@@ -231,10 +235,39 @@ class JobManager:
         self._inline = False  # set when the child could not be started
         self._reader: threading.Thread | None = None
         self._inbox: asyncio.Queue[JobMessage] = asyncio.Queue()
+        self._starting: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # -- lifecycle ------------------------------------------------------
 
-    async def start(self, timeout_s: float = 20.0) -> None:
+    async def start(self, timeout_s: float = 45.0) -> None:
+        """Bring the warm worker up.  Idempotent and concurrency-safe.
+
+        The timeout is generous because of the cold case.  Warm, ``spawn`` and
+        ``forkserver`` both come up in ~0.5 s; cold, with ortools' shared
+        libraries not yet in the page cache, the same start measured 11.2 s —
+        and Windows has no ``fork``, so every start is a fresh interpreter doing
+        real imports, with Defender inspecting each DLL on the way.  That is why
+        ``main.py`` warms the worker in the background rather than awaiting it:
+        the UI must not be held hostage to an ortools import on first launch.
+        """
+        loop = asyncio.get_running_loop()
+        if self._loop is not None and self._loop is not loop:
+            # The worker outlived the event loop that created it — a reloading
+            # uvicorn, or a test spinning up a fresh client. Its inbox queue and
+            # its reader thread's call_soon_threadsafe target both belong to the
+            # dead loop, so results would be posted where nobody is listening.
+            # Tear it down and come back warm on this loop.
+            await self.stop()
+        self._loop = loop
+        if self._starting is not None and self._starting.done():
+            if self._starting.cancelled() or self._starting.exception() is not None:
+                self._starting = None  # a failed warm-up must not be cached
+        if self._starting is None:
+            self._starting = asyncio.create_task(self._start_once(timeout_s))
+        await asyncio.shield(self._starting)
+
+    async def _start_once(self, timeout_s: float) -> None:
         if self._proc is not None:
             return
         try:
@@ -279,6 +312,12 @@ class JobManager:
                 return
 
     async def stop(self) -> None:
+        if self._starting is not None:
+            self._starting.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._starting
+            self._starting = None
+        self._loop = None
         if self._pump:
             self._pump.cancel()
             with contextlib.suppress(asyncio.CancelledError):

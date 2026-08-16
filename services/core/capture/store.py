@@ -28,8 +28,12 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.core.capture.grab import Capture, Rect, Tile, capture_from_image
+from services.core.paths import SESSION_ROOT
 
-DEFAULT_ROOT = Path("data/sessions")
+#: Anchored to the repo root, not the CWD: on Windows the app is usually
+#: launched from a shortcut whose working directory is somewhere else entirely,
+#: and a relative path would quietly start a second, empty capture store there.
+DEFAULT_ROOT = SESSION_ROOT
 THUMB_DIRNAME = ".thumbs"
 
 

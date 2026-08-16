@@ -135,8 +135,15 @@ async def lifespan(app: FastAPI):
     except Exception:  # module may not be present in a partial checkout
         log.debug("redaction filter unavailable")
     manager.subscribe(_on_job_message)
-    await manager.start()
+    # Warm the solver process in the BACKGROUND. Warm it costs ~0.5s, but cold —
+    # first launch after a boot, ortools' libraries not in the page cache, and on
+    # Windows no fork plus Defender inspecting every DLL — the same start
+    # measured 11.2s. Awaiting it here would mean staring at a dead browser tab
+    # before you can even paste a key. Jobs submitted meanwhile queue and run the
+    # moment the child is ready.
+    warmup = asyncio.create_task(manager.start())
     yield
+    warmup.cancel()
     await manager.stop()
 
 

@@ -16,8 +16,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-DATA_ROOT = Path(os.environ.get("PUZZLE_COPILOT_DATA", "data"))
-SESSION_ROOT = DATA_ROOT / "sessions"
+from services.core.paths import DATA_ROOT, SESSION_ROOT  # noqa: E402  (re-exported)
+
+__all__ = ["DATA_ROOT", "SESSION_ROOT", "SessionState", "SessionManager", "LeaderboardEntry"]
 
 PuzzleType = Literal["factory", "builder"]
 
