@@ -28,9 +28,12 @@ from services.core.capture.grab import (
     capture_from_image,
     crop_tiles,
     display_available,
+    dpi_awareness_level,
+    ensure_dpi_awareness,
     grab_window,
     grid_tiles,
     list_monitors,
+    looks_blank,
     prepare,
     replay_rect,
     scale_rect,
@@ -123,6 +126,28 @@ def test_window_capture_says_why_it_is_not_implemented():
         grab_window("Puzzle Game")
     msg = str(exc.value)
     assert "grab_region" in msg  # tells the caller what to do instead
+
+
+def test_the_windows_dpi_layer_is_inert_on_linux():
+    """The Windows capture layer must never make Linux (dev + CI) pay for it.
+
+    Importing this module already ran ensure_dpi_awareness() -- on Linux that
+    has to be a no-op that touches no ctypes.windll and raises nothing.
+    """
+    assert dpi_awareness_level() == "not_windows"
+    assert ensure_dpi_awareness() == "not_windows"
+
+
+def test_a_capture_has_no_warnings_by_default():
+    cap = make_capture()
+    assert cap.warnings == []
+    assert cap.is_blank is False
+    assert cap.raise_if_blank() is cap
+
+
+def test_looks_blank_is_pure_and_display_free():
+    assert looks_blank(Image.new("RGB", (320, 240), (0, 0, 0))) is True
+    assert looks_blank(make_image(320, 240)) is False
 
 
 def test_hotkeys_module_imports_without_pynput():

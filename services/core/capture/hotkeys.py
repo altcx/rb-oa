@@ -8,6 +8,31 @@ is optional.
 The dispatch logic lives entirely in :class:`HotkeyManager` and is driven by
 :meth:`HotkeyManager.simulate`, so the interesting half is testable without a
 keyboard.
+
+Windows notes (the production platform)
+---------------------------------------
+
+*   pynput's Windows backend is a Win32 low-level keyboard hook.  It needs no
+    ``DISPLAY``, no X11 and no compositor -- ``DISPLAY`` is an X11 notion and
+    checking for it on Windows would disable hotkeys that work fine.  See
+    :func:`available`.
+*   **UIPI: a game running as ADMINISTRATOR swallows hotkeys.**  Windows'
+    User Interface Privilege Isolation forbids a lower-integrity process from
+    receiving input aimed at a higher-integrity window.  If the game (or its
+    anti-cheat launcher) runs elevated and this tool does not, the hook is
+    installed successfully and simply never fires while the game has focus --
+    a silent failure that looks like "the hotkeys stopped working".
+    What to do, in order of preference:
+
+    1.  Run the game *without* elevation if it does not truly need it.
+    2.  Otherwise run this tool elevated as well (right-click -> Run as
+        administrator, or a shortcut with the "run as administrator" flag), so
+        both processes sit at the same integrity level.
+    3.  Otherwise use the on-screen capture button in the UI, which does not
+        depend on global key delivery at all.
+
+    Full-screen exclusive games and some anti-cheat drivers can also block
+    low-level hooks outright; the on-screen button is the fallback there too.
 """
 
 from __future__ import annotations
@@ -15,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import sys
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
@@ -36,7 +62,7 @@ DEFAULT_BINDINGS: dict[str, str] = {
 ACTION_HELP: dict[str, str] = {
     "capture_monitor": "Grab the puzzle monitor and start speculative extraction.",
     "capture_region": "Drag a region, grab it, extract it.",
-    "capture_window": "Grab the focused window (needs a compositor API).",
+    "capture_window": "Grab the focused window (Windows only; Linux has no window API).",
     "capture_and_ask": "Grab and immediately run the solver, no review stop.",
     "accept_all_majority": "Accept every majority-flagged field at once.",
 }
@@ -53,19 +79,35 @@ def _import_pynput():
         return keyboard
     except Exception as exc:  # ImportError, or X11 errors on import
         raise HotkeysUnavailable(
-            "Global hotkeys need the 'pynput' package and a display. "
-            "Install it (pip install pynput) and run on the desktop session; "
-            "the HTTP API's /capture endpoints work without it. "
+            "Global hotkeys need the 'pynput' package and an interactive desktop "
+            "session. Install it (pip install pynput) and run on the desktop "
+            "session; the HTTP API's /capture endpoints work without it. "
             f"({exc})"
         ) from exc
 
 
 def available() -> bool:
-    """True when global hotkeys could actually be bound here."""
+    """True when global hotkeys could actually be bound here.
+
+    Platform-correct rather than X11-shaped:
+
+    *   **Windows** -- pynput uses a Win32 keyboard hook, which needs an
+        interactive window station and nothing else.  No ``DISPLAY`` involved,
+        so requiring one here would wrongly report False on every production
+        machine.  Note this cannot detect the UIPI/elevation problem described
+        in the module docstring: hotkeys can report available and still never
+        fire while an elevated game holds focus.
+    *   **macOS** -- the Quartz backend also has no ``DISPLAY``; the real gate
+        is the Accessibility permission, which cannot be probed without
+        prompting, so this stays optimistic.
+    *   **Linux** -- X11/Wayland, so a display really is required.
+    """
     try:
         _import_pynput()
     except HotkeysUnavailable:
         return False
+    if sys.platform.startswith("win") or sys.platform == "darwin":
+        return True
     from services.core.capture.grab import display_available
 
     return display_available()
