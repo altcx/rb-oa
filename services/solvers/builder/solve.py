@@ -95,7 +95,7 @@ def solve_builder(
         for w in warnings:
             if w not in report.warnings:
                 report.warnings.append(w)
-        _enrich(report, cp, rules, objective, max_builds, budget_s, keep_elimination=True)
+        _enrich(report, cp, rules, objective, budget_s, keep_elimination=True)
         report.elapsed_ms = (time.perf_counter() - started) * 1000.0
         return report
 
@@ -125,7 +125,7 @@ def solve_builder(
     report.method = method
     report.exact = exact
 
-    _enrich(report, cp, rules, objective, max_builds, budget_s, keep_elimination=False)
+    _enrich(report, cp, rules, objective, budget_s, keep_elimination=False)
     report.elapsed_ms = (time.perf_counter() - started) * 1000.0
     return report
 
@@ -175,7 +175,6 @@ def _enrich(
     cp: ClippedPuzzle,
     rules: BuilderRules,
     objective: str,
-    max_builds: int,
     budget_s: float,
     keep_elimination: bool,
 ) -> None:

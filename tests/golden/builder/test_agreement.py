@@ -219,6 +219,44 @@ def test_enumeration_of_four_million_subsets_is_fast():
 
 
 @pytest.mark.timeout(60)
+def test_meet_in_the_middle_scales_to_forty_parts():
+    """n=40 is 2**40 subsets; both halves collapse, and the answer is exact."""
+    rng = random.Random(2024)
+    parts = [
+        Part(
+            id=f"p{i}",
+            weight=rng.randint(1, 10),
+            attributes={a: rng.randint(0, 5) for a in ATTRS[:2]},
+        )
+        for i in range(40)
+    ]
+    obstacles = [
+        Obstacle(id=f"o{j}", order=j, requires={a: rng.randint(3, 8) for a in ATTRS[:2]})
+        for j in range(4)
+    ]
+    pz = BuilderPuzzle(
+        parts=parts,
+        obstacles=obstacles,
+        rules=BuilderRules(
+            weight_max=55,
+            obstacle_semantics="threshold",
+            aggregation="sum",
+            duplicates_allowed=False,
+            obstacle_ordering="unordered",
+            failure_mode="all_must_pass",
+            objective="count_valid",
+        ),
+    )
+    cp = clip_puzzle(pz)
+    started = time.perf_counter()
+    mitm = count_meet_in_middle(cp, pz.rules)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 10.0, f"took {elapsed:.2f}s"
+    assert mitm == count_dp(cp, pz.rules)
+    assert mitm > 0
+
+
+@pytest.mark.timeout(60)
 def test_large_part_set_falls_back_without_enumerating():
     """60 parts: far past every enumeration ceiling, still exact via the DP."""
     rng = random.Random(31337)

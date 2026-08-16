@@ -204,6 +204,55 @@ def _sum_valid(
 # ---------------------------------------------------------------------------
 
 
+#: Largest (weight x attribute-lattice) key space we will collapse a half onto.
+COLLAPSE_LIMIT = 5_000_000
+
+
+def _collapse_half(
+    weights: np.ndarray, aggs: np.ndarray, caps: np.ndarray, weight_max: int | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Collapse one half onto distinct ``(weight, attr vector)`` keys with counts.
+
+    Subsets that agree on weight and clipped aggregate are interchangeable for
+    everything that follows, so carrying them separately is pure waste.  Returns
+    ``(weights, aggregates, multiplicities)``; the multiplicities are all 1 when
+    the key space is too big to collapse onto.
+    """
+    n_attrs = aggs.shape[1]
+    if weight_max is not None:
+        keep = weights <= int(weight_max)
+        weights = weights[keep]
+        aggs = aggs[keep]
+    if weights.size == 0:
+        return weights, aggs, np.ones(0, dtype=np.int64)
+
+    lattice = 1
+    for c in caps:
+        lattice *= int(c) + 1
+    n_weights = (int(weight_max) + 1) if weight_max is not None else 1
+    if n_attrs == 0 or lattice * n_weights > COLLAPSE_LIMIT:
+        return weights, aggs, np.ones(weights.shape, dtype=np.int64)
+
+    attr_key = np.zeros(weights.shape, dtype=np.int64)
+    stride = 1
+    for k in range(n_attrs):
+        attr_key += aggs[:, k] * stride
+        stride *= int(caps[k]) + 1
+    wkey = weights if weight_max is not None else np.zeros_like(weights)
+    key = wkey * lattice + attr_key
+
+    counts = np.bincount(key, minlength=lattice * n_weights)
+    nz = np.flatnonzero(counts)
+    out_w = nz // lattice if weight_max is not None else np.zeros(nz.shape, dtype=np.int64)
+    rest = nz % lattice
+    out_a = np.zeros((nz.size, n_attrs), dtype=np.int64)
+    for k in range(n_attrs):
+        size = int(caps[k]) + 1
+        out_a[:, k] = rest % size
+        rest = rest // size
+    return out_w.astype(np.int64), out_a, counts[nz].astype(np.int64)
+
+
 def count_meet_in_middle(cp: ClippedPuzzle, rules: BuilderRules) -> int:
     """Subset count by splitting the parts in half (n <= 44).
 
@@ -215,6 +264,11 @@ def count_meet_in_middle(cp: ClippedPuzzle, rules: BuilderRules) -> int:
     are clipped), so we group the first half by ``t``, build one prefix-count
     array over the sorted second half per distinct ``t``, and binary-search the
     weight limit into it.
+
+    Each half is first COLLAPSED onto ``(weight, clipped attribute vector)`` with
+    multiplicities.  Clipping bounds that key space by ``(weight_max+1) * prod
+    (caps+1)``, which is orders of magnitude smaller than ``2**(n/2)``, so the
+    per-threshold scan of the sorted half stays cheap.
     """
     rules, _ = resolve_rules(rules)
     if rules.duplicates_allowed:
@@ -252,13 +306,17 @@ def count_meet_in_middle(cp: ClippedPuzzle, rules: BuilderRules) -> int:
         lagg[0, :] = cp.caps
         ragg[0, :] = cp.caps
 
+    weight_max = rules.weight_max
+    lw, lagg, lcount = _collapse_half(lw, lagg, cp.caps, weight_max)
+    rw, ragg, rcount = _collapse_half(rw, ragg, cp.caps, weight_max)
+
     order = np.argsort(rw, kind="stable")
     rw = rw[order]
     ragg = ragg[order]
+    rcount = rcount[order]
 
-    weight_max = rules.weight_max
     if weight_max is None:
-        limits = np.full(lw.shape, rw[-1] if rw.size else 0, dtype=np.int64)
+        limits = np.full(lw.shape, int(rw.max()) if rw.size else 0, dtype=np.int64)
         keep_left = np.ones(lw.shape, dtype=bool)
     else:
         limits = int(weight_max) - lw
@@ -298,9 +356,9 @@ def count_meet_in_middle(cp: ClippedPuzzle, rules: BuilderRules) -> int:
             ok_right = (ragg >= thr[None, :]).all(axis=1)
         else:
             ok_right = np.ones(rw.shape, dtype=bool)
-        prefix = np.concatenate([[0], np.cumsum(ok_right.astype(np.int64))])
+        prefix = np.concatenate([[0], np.cumsum(ok_right * rcount)])
         pos = np.searchsorted(rw, limits[rows], side="right")
-        total += int(prefix[pos].sum())
+        total += int((prefix[pos] * lcount[rows]).sum())
 
     if aggregation == "min" and cp.n_attrs:
         # The all-empty build was counted with aggregate = caps; by convention it
