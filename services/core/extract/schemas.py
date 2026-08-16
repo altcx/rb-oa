@@ -39,7 +39,7 @@ NULL_HINT = " Emit null if this is not legible in the image; never guess."
 class RecipeExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = Field(description="Recipe identifier or its exact label." + NULL_HINT)
+    id: str | None = Field(default=None, description="Recipe identifier or its exact label." + NULL_HINT)
     name: str | None = Field(default=None, description="Human label shown in the UI." + NULL_HINT)
     inputs: dict[str, int] | None = Field(
         default=None,
@@ -70,7 +70,7 @@ class MachinePanelExtraction(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = Field(description="Machine identifier or on-screen label." + NULL_HINT)
+    id: str | None = Field(default=None, description="Machine identifier or on-screen label." + NULL_HINT)
     kind: Literal["supplier", "maker", "seller"] | None = Field(
         default=None, description="Machine kind." + NULL_HINT
     )
@@ -117,6 +117,7 @@ class TopologyExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edges: list[dict[str, str]] | None = Field(
+        default=None,
         description=(
             "Directed connections as objects with keys 'src' and 'dst', using the "
             "machine labels shown on screen. Material flows src -> dst." + NULL_HINT
@@ -127,7 +128,7 @@ class TopologyExtraction(BaseModel):
 class FactoryHUDExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    money: float | None = Field(description="Current money on hand." + NULL_HINT)
+    money: float | None = Field(default=None, description="Current money on hand." + NULL_HINT)
     horizon_hours: int | None = Field(
         default=None, description="Total hours in the run." + NULL_HINT
     )
@@ -152,7 +153,7 @@ class FactoryExtraction(BaseModel):
 class PartExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = Field(description="Part identifier or its exact label." + NULL_HINT)
+    id: str | None = Field(default=None, description="Part identifier or its exact label." + NULL_HINT)
     name: str | None = Field(default=None, description="Displayed name." + NULL_HINT)
     weight: int | None = Field(default=None, description="Weight of one copy." + NULL_HINT)
     qty_available: int | None = Field(
@@ -171,7 +172,7 @@ class PartExtraction(BaseModel):
 class ObstacleExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = Field(description="Obstacle identifier or label." + NULL_HINT)
+    id: str | None = Field(default=None, description="Obstacle identifier or label." + NULL_HINT)
     order: int | None = Field(
         default=None, description="1-based position in the obstacle sequence." + NULL_HINT
     )
@@ -191,7 +192,7 @@ class BuilderRulesExtraction(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    weight_max: int | None = Field(description="Total weight budget." + NULL_HINT)
+    weight_max: int | None = Field(default=None, description="Total weight budget." + NULL_HINT)
     slot_max: int | None = Field(default=None, description="Maximum part count." + NULL_HINT)
     money_max: int | None = Field(default=None, description="Spend budget." + NULL_HINT)
     duplicates_allowed: bool | None = Field(

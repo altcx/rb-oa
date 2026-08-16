@@ -269,6 +269,19 @@ _FACTORY_EXPERIMENTS: dict[str, Experiment] = {
             "partial": "It delivered as many units as the remaining money covered.",
         },
     ),
+    "full_storage_behavior": _exp(
+        "full_storage_behavior",
+        FACTORY_FLAG_OPTIONS["full_storage_behavior"],
+        "Let one maker fill its storage completely while its consumer is switched "
+        "off, then watch that maker for one hour with its inputs still available.",
+        "Whether the upstream inputs drain and money drops while storage stays at "
+        "its cap.",
+        {
+            "idle": "Inputs are untouched and money is flat — a full machine stops.",
+            "produce_and_waste": "Inputs drain and money drops while storage stays "
+            "capped — it keeps producing into a full buffer and destroys the output.",
+        },
+    ),
 }
 
 #: Every flag we can write an experiment for.

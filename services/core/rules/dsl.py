@@ -91,6 +91,7 @@ PriorityRecompute = Literal["fixed", "per_hour"]
 OutputMaxMeaning = Literal["per_hour_ceiling", "separate_from_storage"]
 ModStacking = Literal["multiplicative", "independent"]
 InsufficientFunds = Literal["skipped", "partial"]
+FullStorageBehavior = Literal["idle", "produce_and_waste"]
 
 
 class RuleFlags(BaseModel):
@@ -110,6 +111,11 @@ class RuleFlags(BaseModel):
     output_max_meaning: OutputMaxMeaning = "per_hour_ceiling"
     mod_stacking: ModStacking = "independent"
     insufficient_funds: InsufficientFunds = "skipped"
+    #: Not in the spec's table of eight.  The simulator cannot avoid taking a
+    #: position on it, and the two positions differ in money (produce_and_waste
+    #: burns input and production cost for nothing), so it is a flag rather than
+    #: a comment in a header.
+    full_storage_behavior: FullStorageBehavior = "idle"
 
 
 FACTORY_FLAG_ORDER: tuple[str, ...] = (
@@ -121,6 +127,7 @@ FACTORY_FLAG_ORDER: tuple[str, ...] = (
     "output_max_meaning",
     "mod_stacking",
     "insufficient_funds",
+    "full_storage_behavior",
 )
 
 FACTORY_FLAG_OPTIONS: dict[str, tuple[Any, ...]] = {
@@ -132,6 +139,7 @@ FACTORY_FLAG_OPTIONS: dict[str, tuple[Any, ...]] = {
     "output_max_meaning": ("per_hour_ceiling", "separate_from_storage"),
     "mod_stacking": ("independent", "multiplicative"),
     "insufficient_funds": ("skipped", "partial"),
+    "full_storage_behavior": ("idle", "produce_and_waste"),
 }
 
 

@@ -22,7 +22,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -170,11 +170,14 @@ class CaptureStore:
         scale: float = 1.0,
         monitor_index: int = 0,
         notes: dict[str, Any] | None = None,
+        tiles: Sequence[Tile] | None = None,
     ) -> CaptureMeta:
         """Store an already-encoded image (upload path, replayed fixture, test).
 
         Lets the tool be driven on a machine where the screen-grab backend does
-        not work at all.
+        not work at all.  ``tiles`` carries the per-panel regions through, so an
+        uploaded board fans out the same way a grabbed one does instead of
+        falling back to the default grid.
         """
         with Image.open(io.BytesIO(data)) as im:
             image = im.convert("RGB")
@@ -185,6 +188,7 @@ class CaptureStore:
             session_id=session_id,
             puzzle_type=puzzle_type,
             source="upload",
+            tiles=list(tiles) if tiles else None,
         )
         return self.save(cap, notes=notes)
 

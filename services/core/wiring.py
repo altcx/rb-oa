@@ -22,9 +22,9 @@ class ServerSessionStore:
 
     def list_captures(self, session_id: str) -> list[dict[str, Any]]:
         try:
-            from services.core.capture.store import CaptureStore
+            from services.core.capture.store import default_store
 
-            return [c.model_dump(mode="json") for c in CaptureStore().list_captures(session_id)]
+            return [c.model_dump(mode="json") for c in default_store().list_captures(session_id)]
         except Exception:
             return []
 
@@ -151,6 +151,114 @@ def event_to_ws(event: Any) -> dict[str, Any]:
     if kind == "done":
         return {"type": "agent_done", "message": event.text, "stop_reason": event.stop_reason}
     return {"type": "warning", "text": event.text or "agent error"}
+
+
+# ---------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_roles():
+    """Turn the stored role assignment into the pipeline's ``ExtractRoles``."""
+    from services.core.extract.pipeline import ExtractRoles
+
+    a = roles()
+    if not a.extractor_jury:
+        raise AgentUnavailable("no extractor jury assigned — pick three models in settings")
+    return ExtractRoles(jury=list(a.extractor_jury), tie_breaker=a.tie_breaker)
+
+
+def _load_captures(session_id: str, capture_ids: list[str]):
+    from services.core.capture.store import default_store
+
+    cs = default_store()
+    return [cs.load(cid, session_id) for cid in capture_ids]
+
+
+async def run_extraction(
+    session_id: str,
+    capture_ids: list[str],
+    puzzle_type: str | None = None,
+    *,
+    use_previous: bool = True,
+):
+    """Extract and fold the result into the session.
+
+    ``use_previous`` turns on delta extraction once a state has been confirmed:
+    the previous state plus the new crop, asking only for fields that differ.
+    """
+    from services.core.extract import pipeline
+
+    s = sessions.require(session_id)
+    ptype = puzzle_type or s.puzzle_type
+    client = _client()
+    try:
+        result = await pipeline.extract(
+            client,
+            extract_roles(),
+            _load_captures(session_id, capture_ids),
+            ptype,
+            previous_state=(s.state if (use_previous and s.confirmed_at) else None),
+        )
+    finally:
+        close = getattr(client, "aclose", None)
+        if close:
+            await close()
+    apply_extraction(s, result)
+    return result
+
+
+def start_speculative_extraction(session_id: str, capture_id: str):
+    """Fire extraction the moment a capture lands, before the user asks.
+
+    Returns the in-flight task, or ``None`` when extraction is not configured —
+    a missing key must never break the capture path.
+    """
+    from services.core.extract import pipeline
+
+    s = sessions.require(session_id)
+    try:
+        client = _client()
+        return pipeline.speculate(
+            client,
+            extract_roles(),
+            _load_captures(session_id, [capture_id]),
+            s.puzzle_type,
+            previous_state=(s.state if s.confirmed_at else None),
+        )
+    except Exception:
+        return None
+
+
+def apply_extraction(s: SessionState, result: Any) -> None:
+    """Fold an ``ExtractionResult`` into the session the UI reads.
+
+    Disputed fields come first, because the inspector sorts by disagreement
+    rather than document order.
+    """
+    from services.core.session import FieldVerdictView
+
+    solved = result.factory_state or result.builder_puzzle
+    s.pending_state = solved.model_dump(mode="json") if solved is not None else result.extraction
+    s.unresolved = result.needs_review()
+    verdicts: list[FieldVerdictView] = []
+    for p in result.provenance:
+        verdicts.append(
+            FieldVerdictView(
+                path=p.path,
+                value=p.value,
+                status=p.status if p.status in {"unanimous", "majority", "split"} else "split",
+                votes=p.votes,
+                alternatives=[v for v in p.votes.values() if v != p.value],
+                confidence=p.confidence,
+                crop={"capture_id": p.capture_id, "box": p.box, "tile": p.tile} if p.box else None,
+            )
+        )
+    order = {"split": 0, "majority": 1, "unanimous": 2}
+    verdicts.sort(key=lambda v: (order.get(v.status, 0), v.path))
+    s.verdicts = verdicts
+    s.latency = {**s.latency, **result.stage_ms, "extraction_total": result.elapsed_ms}
+    sessions.save(s)
 
 
 # ---------------------------------------------------------------------------

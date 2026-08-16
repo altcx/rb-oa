@@ -183,9 +183,11 @@ def _require(session_id: str) -> SessionState:
 
 
 def _capture_store():
-    from services.core.capture.store import CaptureStore  # lazy: optional at runtime
+    # The module-level default store, not a fresh CaptureStore(): the root is
+    # configurable (env, tests) and everything must agree on where captures live.
+    from services.core.capture.store import default_store  # lazy: optional at runtime
 
-    return CaptureStore()
+    return default_store()
 
 
 @app.get("/api/sessions/{session_id}/captures")
@@ -277,15 +279,54 @@ def api_capture_thumb(capture_id: str) -> Any:
 
 
 async def _speculate(session: SessionState, capture_id: str) -> None:
-    """Start extraction the moment a capture lands (spec 6.2), before asked."""
+    """Start extraction the moment a capture lands (spec 6.2), before asked.
+
+    The user's question arrives a second or two later and finds the work already
+    done — or already running, which is the same thing as far as they can tell.
+    """
     try:
-        from services.core.extract.pipeline import speculate
-    except Exception:
-        return
-    try:
-        await speculate(session_id=session.id, capture_id=capture_id, puzzle_type=session.puzzle_type)
+        from services.core.wiring import apply_extraction, start_speculative_extraction
+
+        task = start_speculative_extraction(session.id, capture_id)
+        if task is None:
+            return
+        result = await task
+        apply_extraction(session, result)
+        await hub.send(
+            session.id,
+            {
+                "type": "extraction_progress",
+                "stage": "speculative_done",
+                "ms": result.elapsed_ms,
+                "disputed": len(result.disputed),
+                "auto_confirmed": len(result.auto_confirmed),
+            },
+        )
+        await hub.send(session.id, {"type": "state", **api_state(session.id)})
     except Exception as exc:
-        log.debug("speculative extraction failed: %s", exc)
+        log.debug("speculative extraction unavailable: %s", exc)
+
+
+@app.post("/api/extract")
+async def api_extract(body: dict[str, Any] = Body(...)) -> Any:
+    s = _require(body["session_id"])
+    try:
+        from services.core.wiring import run_extraction
+
+        result = await run_extraction(
+            s.id, list(body["capture_ids"]), body.get("puzzle_type") or s.puzzle_type
+        )
+    except Exception as exc:
+        return _err(503, f"extraction unavailable: {exc}")
+    await hub.send(s.id, {"type": "state", **api_state(s.id)})
+    return {
+        "ok": True,
+        "disputed": result.disputed,
+        "auto_confirmed": len(result.auto_confirmed),
+        "unresolved": result.unresolved,
+        "elapsed_ms": result.elapsed_ms,
+        "used_delta": result.used_delta,
+    }
 
 
 # -- state ------------------------------------------------------------------

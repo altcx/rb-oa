@@ -552,29 +552,39 @@ class ToolRegistry:
     ) -> dict[str, Any]:
         sid = self._sid(session_id)
         try:
-            from services.core.extract.pipeline import extract  # type: ignore
+            from services.core.wiring import run_extraction  # type: ignore
         except ImportError as exc:
             return _err(
                 "extract_state",
                 f"extraction pipeline not available ({exc}). "
                 "Ask the user to confirm the state manually, or use get_state.",
-                unavailable="services.core.extract.pipeline",
+                unavailable="services.core.wiring",
             )
-        captures = [self.store.get_capture(sid, cid) for cid in capture_ids]
-        missing = [cid for cid, c in zip(capture_ids, captures) if c is None]
+        missing = [cid for cid in capture_ids if self.store.get_capture(sid, cid) is None]
         if missing:
             return _err("extract_state", f"unknown capture ids: {', '.join(missing)}")
-        result = extract(captures=[c for c in captures if c], puzzle_type=puzzle_type)
-        if inspect.isawaitable(result):
-            result = await result
-        payload = _jsonable(result)
-        if isinstance(payload, dict) and payload.get("state") is not None:
-            self.store.set_state(sid, payload["state"])
-            try:
-                self.store.set_puzzle_type(sid, puzzle_type)  # type: ignore[attr-defined]
-            except AttributeError:
-                pass
-        return {"ok": True, "extraction": payload}
+        try:
+            result = await run_extraction(sid, list(capture_ids), puzzle_type)
+        except Exception as exc:
+            return _err("extract_state", f"{type(exc).__name__}: {exc}")
+
+        # Disputed fields are the whole point of the payload: the model must ask
+        # about those and nothing else.  The merged state stays out of context —
+        # it is already in the session, and get_state will fetch it on demand.
+        state = result.factory_state or result.builder_puzzle
+        trimmed: list[str] = []
+        return {
+            "ok": True,
+            "puzzle_type": result.puzzle_type,
+            "disputed": _trim(result.disputed, 40, "disputed", trimmed),
+            "unresolved": _trim(result.unresolved, 40, "unresolved", trimmed),
+            "auto_confirmed_count": len(result.auto_confirmed),
+            "state_available": state is not None,
+            "elapsed_ms": round(result.elapsed_ms, 1),
+            "used_delta": result.used_delta,
+            "errors": result.errors,
+            "trimmed": trimmed,
+        }
 
     def get_state(self, session_id: str | None = None) -> dict[str, Any]:
         sid = self._sid(session_id)
