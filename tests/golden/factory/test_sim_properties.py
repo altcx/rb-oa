@@ -9,14 +9,16 @@ and asserts that flipping it moves ``money_by_hour``.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from services.core.rules.dsl import FACTORY_FLAG_ORDER, RuleFlags
 from services.solvers.factory.bounds import upper_bound
-from services.solvers.factory.calibrate import calibrate, gate_ok
-from services.solvers.factory.model import FactoryConfig, ModKind, Recipe
+from services.solvers.factory.calibrate import calibrate, flag_space, gate_ok
+from services.solvers.factory.model import FactoryConfig, ModKind, Recipe, WarningKind
 from services.solvers.factory.optimize import optimize, validate_config, validation_errors
-from services.solvers.factory.sim import simulate
+from services.solvers.factory.sim import FLAG_DEFAULTS, make_flags, simulate
 from tests.golden.factory.test_golden import conf, maker, seller, supplier, world
 
 # ---------------------------------------------------------------------------
@@ -238,6 +240,35 @@ def test_flag_mod_stacking_changes_money():
     assert a.money_by_hour != b.money_by_hour
 
 
+def test_flag_full_storage_behavior_changes_money():
+    # The ninth flag, promoted out of the simulator's assumptions block.
+    # M makes 3 widgets an hour into a 4-slot buffer and Z (set to 10) never
+    # drains it, so from hour 4 M is jammed.
+    #   "idle": M stands down.  It stops eating ore, stops paying, and only the
+    #           2-widget overshoot that jammed it was ever destroyed.
+    #   "produce_and_waste": M keeps running into a full buffer -- paying 1.5 an
+    #           hour to destroy 3 widgets an hour, for nothing at all.
+    st = _overflow_world()
+    cfg = conf(st, {"S": 3, "M": 3, "Z": 10})
+    idle = simulate(st, cfg, make_flags(full_storage_behavior="idle"))
+    waste = simulate(st, cfg, make_flags(full_storage_behavior="produce_and_waste"))
+
+    assert idle.money_by_hour != waste.money_by_hour
+    # burning inputs and production cost for output that is destroyed is strictly
+    # worse, and that economic difference is the whole reason this is a flag
+    assert waste.final_money < idle.final_money
+    assert waste.total_cost > idle.total_cost
+
+    def wasted(res):
+        return sum(w.amount for w in res.warnings if w.kind == WarningKind.OVERFLOW)
+
+    def idled(res):
+        return sum(1 for w in res.warnings if w.kind == WarningKind.IDLE_FULL)
+
+    assert wasted(waste) > wasted(idle)
+    assert idled(idle) > 0 and idled(waste) == 0
+
+
 def test_flag_insufficient_funds_changes_money():
     # An order of 4 ore at 3 each costs 12 and there is only 10 in the bank:
     # either the whole order is refused, or 3 ore are bought for 9.
@@ -255,13 +286,27 @@ def test_flag_insufficient_funds_changes_money():
 
 
 def test_every_flag_has_a_test():
-    """Guard against a flag being added to the DSL and quietly ignored here."""
-    covered = {
-        name
-        for name in FACTORY_FLAG_ORDER
-        if f"test_flag_{name}_changes_money" in globals()
-    }
-    assert covered == set(FACTORY_FLAG_ORDER), sorted(set(FACTORY_FLAG_ORDER) - covered)
+    """Guard against a flag being added and quietly ignored here.
+
+    Checked against the whole searched space, not just the DSL's list, so a flag
+    promoted inside this package is covered from the moment it exists.
+    """
+    expected = set(flag_space()) | set(FACTORY_FLAG_ORDER) | set(FLAG_DEFAULTS)
+    covered = {name for name in expected if f"test_flag_{name}_changes_money" in globals()}
+    assert covered == expected, sorted(expected - covered)
+
+
+def test_calibration_searches_every_flag_the_simulator_honours():
+    """A rule the hour loop branches on but calibration never sweeps would be a
+    silent guess: the run would look unexplainable and nobody would know why."""
+    space = flag_space()
+    for name in FACTORY_FLAG_ORDER:
+        assert name in space, f"{name} is in the DSL but not searched"
+    for name in FLAG_DEFAULTS:
+        assert name in space, f"the simulator branches on {name} but nothing searches it"
+    assert len(space) >= 9
+    for name, options in space.items():
+        assert len(options) >= 2, f"{name} has nothing to choose between"
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +436,31 @@ def test_on_improve_is_called_and_carries_a_usable_result():
     for partial in seen:
         assert validate_config(st, partial.best)
     assert seen[-1].best_value <= res.best_value
+    # the stream must end on the answer that is actually returned, including any
+    # gain found by the post-search layers
+    assert seen[-1].best_value == res.best_value
+
+
+def test_the_caller_is_never_left_in_silence():
+    """Anytime means a steady stream, not one callback and then a spinner.
+
+    A solve that plateaus early must still report "still working, here is what I
+    have" -- marked ``improved=False`` so a caller can tell the two apart.
+    """
+    st = _rich_world()
+    stamps: list[tuple[float, bool]] = []
+    t0 = time.perf_counter()
+    optimize(
+        st,
+        seconds=1.5,
+        on_improve=lambda r: stamps.append((time.perf_counter() - t0, r.improved)),
+    )
+    assert len(stamps) >= 4, f"only {len(stamps)} callbacks in 1.5 s"
+    assert any(not improved for _t, improved in stamps), "no heartbeats, only improvements"
+    assert any(improved for _t, improved in stamps), "improvements are not marked"
+    gaps = [stamps[i + 1][0] - stamps[i][0] for i in range(len(stamps) - 1)]
+    assert max(gaps) < 0.75, f"went quiet for {max(gaps):.2f}s"
+    assert stamps[0][0] < 0.25, "the first best-so-far arrived too late"
 
 
 def test_endgame_schedule_is_valid_and_only_ever_helps(solved):
@@ -459,7 +529,7 @@ def test_calibrate_matches_when_the_defaults_are_right():
 def test_calibrate_recovers_a_known_non_default_flag_combination():
     st = _calibration_world()
     cfg = conf(st, {"S": 2, "M": 2, "Z": 2})
-    truth_flags = RuleFlags(
+    truth_flags = make_flags(
         two_hour_consume_timing="start_hour_2",
         supplier_cost_timing="at_delivery",
         insufficient_funds="partial",
@@ -476,6 +546,44 @@ def test_calibrate_recovers_a_known_non_default_flag_combination():
     assert res.resolved_flags.supplier_cost_timing == "at_delivery"
     assert gate_ok(res)
     assert res.discriminating_hours
+
+
+def test_calibrate_recovers_the_full_storage_flag():
+    """The ninth flag is discriminable from a money series, which is exactly
+    why it was promoted out of the assumptions block."""
+    st = world(
+        [
+            supplier("S", "ore", 1.0, out_max=3, storage=50),
+            maker(
+                "M",
+                [
+                    Recipe(
+                        id="m",
+                        inputs={"ore": 1},
+                        output_item="widget",
+                        output_qty=1,
+                        production_cost=0.5,
+                    )
+                ],
+                out_max=3,
+                storage=4,
+            ),
+            seller("Z", "widget", 5.0),
+        ],
+        [("S", "M"), ("M", "Z")],
+        money=100.0,
+        horizon=10,
+        items=["ore", "widget"],
+    )
+    cfg = conf(st, {"S": 3, "M": 3, "Z": 10})
+    truth = make_flags(full_storage_behavior="produce_and_waste")
+    observed = simulate(st, cfg, truth).money_by_hour[1:]
+
+    res = calibrate(st, cfg, observed)
+    assert not res.matched  # the default ("idle") does not explain this run
+    assert res.resolved_flags is not None
+    assert res.resolved_flags.full_storage_behavior == "produce_and_waste"
+    assert gate_ok(res)
 
 
 def test_calibrate_refuses_to_gate_an_unexplainable_run():

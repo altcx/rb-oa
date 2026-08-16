@@ -59,6 +59,9 @@ from services.solvers.factory.sim import (
     vector_to_config,
 )
 
+#: Longest the caller may go without hearing from an in-flight solve.
+HEARTBEAT_S = 0.25
+
 
 class ArchiveEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,6 +87,9 @@ class OptimizeResult(BaseModel):
     elapsed_s: float = 0.0
     iterations: int = 0
     converged: bool = False
+    #: False marks a progress heartbeat -- same best as last time, still searching.
+    #: The final returned result is always True.
+    improved: bool = True
     #: per-hour drain schedule (layer 4)
     endgame: list[Action] = Field(default_factory=list)
 
@@ -407,22 +413,42 @@ def optimize(
         if val > best_value:
             best_vec, best_value, best_skips = vec.copy(), val, sk
 
-    def emit() -> None:
+    last_callback = [0.0]
+
+    def emit(
+        improved: bool = True,
+        iterations: int = 0,
+        config: FactoryConfig | None = None,
+    ) -> None:
+        """Stream the best-so-far.
+
+        Two kinds of callback, distinguished by ``improved``: a real improvement
+        to the incumbent, and a heartbeat that says "still working, here is what
+        I have, it has not moved".  Silence is the one thing that is not allowed
+        -- the user must never be looking at a spinner.
+
+        A heartbeat carries the config and the numbers but skips the action diff,
+        so it stays cheap enough to fire four times a second forever.
+        """
         if on_improve is None:
             return
+        now = time.perf_counter()
+        last_callback[0] = now
         try:
+            streamed = config if config is not None else vector_to_config(cf, best_vec)
             on_improve(
                 OptimizeResult(
-                    best=vector_to_config(cf, best_vec),
+                    best=streamed,
                     best_value=best_value,
                     baseline_value=baseline_value,
                     bound=ub.ceiling,
-                    actions=_order_actions(
-                        cf, config_diff(current, vector_to_config(cf, best_vec))
+                    actions=(
+                        _order_actions(cf, config_diff(current, streamed)) if improved else []
                     ),
-                    elapsed_s=time.perf_counter() - t_start,
-                    iterations=0,
+                    elapsed_s=now - t_start,
+                    iterations=iterations,
                     converged=False,
+                    improved=improved,
                     seed_value=seed_value,
                 )
             )
@@ -464,7 +490,10 @@ def optimize(
             if value > best_value:
                 best_vec, best_value, best_skips = cand.copy(), value, skips
                 last_improve_iter = iterations
-                emit()
+                emit(improved=True, iterations=iterations)
+        # heartbeat: at most every HEARTBEAT_S, even when nothing improved
+        if on_improve is not None and time.perf_counter() - last_callback[0] >= HEARTBEAT_S:
+            emit(improved=False, iterations=iterations)
         if iterations - last_improve_iter > stall_limit:
             # restart: kick the incumbent hard, keep the best on the shelf
             cur_vec = best_vec.copy()
@@ -492,6 +521,7 @@ def optimize(
         if v_with > best_value:
             best_vec, best_value = _clamp_vector(cf, with_mod), v_with
             remember(best_vec, best_value)
+            emit(improved=True, iterations=iterations)
 
     # ---- layer 4: endgame drain schedule -----------------------------------
     best_config = vector_to_config(cf, best_vec)
@@ -499,6 +529,9 @@ def optimize(
     if endgame_value > best_value + 1e-9:
         best_config = endgame_config
         best_value = endgame_value
+        # the drain schedule is a genuine improvement and the caller has been
+        # streaming this solve: do not let the last gain arrive only at return
+        emit(improved=True, iterations=iterations, config=best_config)
 
     # ---- reporting ---------------------------------------------------------
     best_res = simulate_compiled(cf, best_config, collect_logs=True)

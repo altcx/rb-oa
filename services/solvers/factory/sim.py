@@ -30,10 +30,23 @@ A2. ``half_materials`` halves the *total* requirement and rounds up:
     ``ceil(qty_per_unit * output_setting / 2)``.  The alternative reading
     (``ceil(qty_per_unit / 2) * output_setting``) is strictly worse for the
     player and is not used; see ``_requirement``.
-A3. A machine whose own output storage is already at its effective cap does not
-    run at all (``IDLE_FULL``) rather than running and destroying everything.
-    Overflow (``OVERFLOW``) is therefore only ever a *partial* overshoot: the
-    buffer had room, the deposit was bigger than the room.
+A3. (PROMOTED TO A FLAG -- no longer an assumption.)  What a machine does when
+    its own output storage is already full is the ``full_storage_behavior``
+    rule flag, options ``idle`` (default) and ``produce_and_waste``:
+
+      * ``idle``: the machine does not run.  It consumes nothing, pays nothing,
+        and emits ``IDLE_FULL``.  ``OVERFLOW`` can then only ever be a *partial*
+        overshoot -- the buffer had room, the deposit was bigger than the room.
+      * ``produce_and_waste``: the machine runs anyway.  It consumes its full
+        input requirement, pays its per-item production cost, and deposits into
+        a buffer with no room, so the entire batch is clipped and logged as
+        ``OVERFLOW``.  A machine in this state burns money for nothing, hour
+        after hour, which is a very different economic outcome -- which is
+        exactly why it is a flag and not a comment.
+
+    NOTE: the flag is read with ``getattr(flags, "full_storage_behavior",
+    "idle")`` so this module works whether or not the installed
+    ``RuleFlags`` model carries the field yet.  See ``make_flags``.
 A4. Mods are maker modifications: they inflate maker production cost only, never
     a supplier's purchase cost.
 A5. Affordability is always *decided* at order time (both settings of
@@ -99,6 +112,37 @@ BIT_DOUBLE_STORAGE = MOD_BIT[ModKind.DOUBLE_STORAGE_MAX]
 
 _INF_HOPS = 9999
 _EPS = 1e-9
+
+#: Defaults for rule flags this simulator honours.  A flag lives in
+#: ``services.core.rules.dsl.RuleFlags``; this table only exists so that the
+#: simulator keeps working while a newly-promoted flag is still landing in the
+#: DSL (the two files are edited by different hands).  Every entry here must
+#: also appear in the DSL -- ``flag_of`` is a compatibility shim, not a place to
+#: invent rules.
+FLAG_DEFAULTS: dict[str, str] = {"full_storage_behavior": "idle"}
+
+
+def flag_of(flags: RuleFlags, name: str) -> str:
+    """Read a rule flag, falling back to its documented default.
+
+    ``RuleFlags`` is frozen and forbids extras, so a flag that has been promoted
+    in this package but not yet added to the DSL model would otherwise raise on
+    construction.  Reading through here keeps the hour loop honest either way.
+    """
+    return getattr(flags, name, FLAG_DEFAULTS[name])
+
+
+def make_flags(**kwargs: str) -> RuleFlags:
+    """Build ``RuleFlags``, tolerating flags the installed DSL model lacks.
+
+    Used by ``calibrate`` (which sweeps every flag the simulator honours) and by
+    the tests.  Once the DSL carries every flag, this is exactly
+    ``RuleFlags(**kwargs)``.
+    """
+    known = {k: v for k, v in kwargs.items() if k in RuleFlags.model_fields}
+    extra = {k: v for k, v in kwargs.items() if k not in RuleFlags.model_fields}
+    flags = RuleFlags(**known)
+    return flags.model_copy(update=extra) if extra else flags
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +502,7 @@ def _run(
     recompute = flags.priority_recompute == "per_hour"
     # (output_max_meaning and mod_stacking are applied inside ``_plan``, which
     # is where the effective caps and per-item costs are computed and cached.)
+    idles_when_full = flag_of(flags, "full_storage_behavior") == "idle"
     partial_funds = flags.insufficient_funds == "partial"
 
     # ---- per-machine plans -------------------------------------------------
@@ -640,9 +685,11 @@ def _run(
             if units <= 0:
                 continue
 
-            # ASSUMPTION A3: a machine with a full buffer idles, it does not run
-            # and destroy its own output.
-            if p[9] != kind_seller and p[8] >= 0:
+            # flag full_storage_behavior: a machine whose buffer is already full
+            # either stands down (default) or runs anyway and destroys the batch.
+            # Under "produce_and_waste" we fall through: it eats its inputs, pays
+            # its production cost, and the deposit step clips the lot.
+            if idles_when_full and p[9] != kind_seller and p[8] >= 0:
                 if buf[p[8]] >= p[6]:
                     if collect_logs:
                         warnings.append(

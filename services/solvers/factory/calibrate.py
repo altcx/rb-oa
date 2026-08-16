@@ -1,10 +1,16 @@
-"""Calibration: pin the eight unstated rules against a real recorded run.
+"""Calibration: pin the unstated rules against a real recorded run.
 
-The optimizer is only as trustworthy as the simulator, and the simulator has
-eight hypotheses baked into it (``RuleFlags``).  ``calibrate`` replays a real
-observed money series through the same config and, when the defaults do not
-reproduce it, re-simulates under all 2^8 = 256 flag combinations and reports
-which of them do.
+The optimizer is only as trustworthy as the simulator, and the simulator has a
+hypothesis baked in for every rule the game never states (``RuleFlags``).
+``calibrate`` replays a real observed money series through the same config and,
+when the defaults do not reproduce it, re-simulates under **every** combination
+of those flags -- 2^N, currently 512 for nine flags -- and reports which of them
+reproduce the observation.
+
+The flag space is derived, never hardcoded: it is every flag the DSL lists plus
+every flag the simulator actually branches on.  A rule the simulator honours but
+the calibrator never searches would be a silent guess, which is the one thing
+this package is not allowed to do.
 
 Nothing here guesses.  If several combinations reproduce the observation, only
 the flags they *all* agree on are pinned; the rest stay at their default and
@@ -15,16 +21,39 @@ running the optimizer at all.
 from __future__ import annotations
 
 import itertools
+import typing
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from services.core.rules import dsl
 from services.core.rules.dsl import FACTORY_FLAG_OPTIONS, FACTORY_FLAG_ORDER, RuleFlags
 from services.solvers.factory.model import FactoryConfig, FactoryState
-from services.solvers.factory.sim import compile_factory, money_series
+from services.solvers.factory.sim import FLAG_DEFAULTS, compile_factory, make_flags, money_series
 
 TOLERANCE = 1e-6
 #: how many near-miss combinations to keep alongside every exact match
 NEAR_MISS_KEPT = 10
+
+
+def flag_space() -> dict[str, tuple]:
+    """Every rule flag to sweep, in order, with its option set.
+
+    Starts from the DSL's own list, then adds any flag the *simulator* branches
+    on that the DSL has not listed yet -- reading its options from the matching
+    ``Literal`` alias in ``dsl`` (``full_storage_behavior`` ->
+    ``FullStorageBehavior``, the convention that file already uses).  Without
+    that union a newly promoted flag would sit at its default forever and
+    calibration would quietly declare a run unexplainable.
+    """
+    space: dict[str, tuple] = {name: FACTORY_FLAG_OPTIONS[name] for name in FACTORY_FLAG_ORDER}
+    for name in FLAG_DEFAULTS:
+        if name in space:
+            continue
+        alias = getattr(dsl, "".join(part.title() for part in name.split("_")), None)
+        options = typing.get_args(alias) if alias is not None else ()
+        if options:
+            space[name] = options
+    return space
 
 
 class HourDiff(BaseModel):
@@ -126,12 +155,13 @@ def calibrate(
             message="No observations were supplied, so nothing could be checked.",
         )
 
-    # ---- sweep every combination of the eight flags -----------------------
-    option_lists = [FACTORY_FLAG_OPTIONS[name] for name in FACTORY_FLAG_ORDER]
+    # ---- sweep every combination of every flag the simulator honours -------
+    space = flag_space()
+    names = list(space)
     candidates: list[FlagCandidate] = []
     all_series: list[list[float]] = []
-    for combo in itertools.product(*option_lists):
-        trial = RuleFlags(**dict(zip(FACTORY_FLAG_ORDER, combo, strict=True)))
+    for combo in itertools.product(*space.values()):
+        trial = make_flags(**dict(zip(names, combo, strict=True)))
         trial_series = money_series(compile_factory(state, trial), config)
         t_aligned, _t_hours = _align(trial_series, observed)
         all_series.append(t_aligned)
@@ -173,12 +203,12 @@ def calibrate(
         )
     elif exact:
         agreed: dict[str, object] = {}
-        for name in FACTORY_FLAG_ORDER:
-            values = {getattr(c.flags, name) for c in exact}
+        for name in names:
+            values = {getattr(c.flags, name, FLAG_DEFAULTS.get(name)) for c in exact}
             if len(values) == 1:
                 agreed[name] = values.pop()
-        undecided = [f for f in FACTORY_FLAG_ORDER if f not in agreed]
-        resolved = RuleFlags(**agreed)
+        undecided = [f for f in names if f not in agreed]
+        resolved = make_flags(**agreed)
         message = (
             f"{len(exact)} rule combinations reproduce the recorded run exactly. "
             f"Pinned the {len(agreed)} flag(s) they all agree on"
@@ -200,7 +230,8 @@ def calibrate(
         first_bad = next((d.hour for d in per_hour if not d.ok), None)
         best = candidates[0]
         message = (
-            f"No combination of the eight rule flags reproduces this run; the closest "
+            f"No combination of the {len(names)} rule flags ({len(candidates)} tried) "
+            f"reproduces this run; the closest "
             f"is off by {best.max_abs_error:g} at worst. The default hypotheses first "
             f"diverge at hour {first_bad}.  Either the board was read wrong "
             f"(a price, a cap, an edge) or the game has a rule we have not modelled. "
@@ -220,7 +251,9 @@ def calibrate(
 
 
 def _describe(flags: RuleFlags) -> str:
-    return ", ".join(f"{name}={getattr(flags, name)}" for name in FACTORY_FLAG_ORDER)
+    return ", ".join(
+        f"{name}={getattr(flags, name, FLAG_DEFAULTS.get(name))}" for name in flag_space()
+    )
 
 
 def gate_ok(result: CalibrationResult) -> bool:
