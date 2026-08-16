@@ -88,3 +88,45 @@ def test_websocket_ping_pong(client):
 
 def test_health(client):
     assert client.get("/api/health").json()["ok"] is True
+
+
+def test_correcting_an_auto_confirmed_field_is_recorded_as_a_p0(client, tmp_path, monkeypatch):
+    """Spec 13: every human correction to an auto-confirmed field is a P0
+    extraction bug, and the capture that caused it must be recoverable."""
+    import json as _json
+
+    import services.core.main as main_mod
+
+    logfile = tmp_path / "regressions.jsonl"
+    monkeypatch.setattr(main_mod, "REGRESSION_LOG", logfile)
+
+    sid = client.post("/api/sessions", json={"puzzle_type": "factory"}).json()["id"]
+    s = session_mod.sessions.require(sid)
+    s.pending_state = {"machines": [{"id": "m1", "output_max": 4, "storage_max": 9}]}
+    s.verdicts = [
+        session_mod.FieldVerdictView(
+            path="machines[m1].output_max",
+            value=4,
+            status="unanimous",
+            votes={"a/1": 4, "b/2": 4, "c/3": 4},
+            crop={"capture_id": "cap_x", "box": {"x": 0, "y": 0, "w": 10, "h": 10}},
+        ),
+        session_mod.FieldVerdictView(
+            path="machines[m1].storage_max", value=9, status="majority", votes={"a/1": 9, "b/2": 9}
+        ),
+    ]
+    session_mod.sessions.save(s)
+
+    # correcting the majority-flagged field is routine and must NOT be logged;
+    # correcting the unanimous one is the bug we care about
+    client.post(
+        f"/api/sessions/{sid}/state/confirm",
+        json={"patch": {"machines[m1].storage_max": 12, "machines[m1].output_max": 6}},
+    )
+
+    rows = [_json.loads(line) for line in logfile.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["path"] == "machines[m1].output_max"
+    assert rows[0]["jury_value"] == 4 and rows[0]["corrected_value"] == 6
+    assert rows[0]["crop"]["capture_id"] == "cap_x"
+    assert rows[0]["votes"] == {"a/1": 4, "b/2": 4, "c/3": 4}

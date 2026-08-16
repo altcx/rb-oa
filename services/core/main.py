@@ -353,20 +353,81 @@ async def api_confirm(session_id: str, body: dict[str, Any] = Body(default={})) 
     flat = flatten(base)
     for path, value in (body.get("patch") or {}).items():
         flat[path] = value
+    patch = body.get("patch") or {}
+    regressions = _record_auto_confirm_corrections(s, patch)
     s.state = unflatten(flat)
     s.confirmed_at = time.time()
-    accepted = set(body.get("patch") or {})
+    accepted = set(patch)
     for v in s.verdicts:
         if v.path in accepted:
             v.status = "manual"
     s.unresolved = [p for p in s.unresolved if p not in accepted]
     sessions.save(s)
     await hub.send(session_id, {"type": "state", **api_state(session_id)})
+    if regressions:
+        await hub.send(
+            session_id,
+            {
+                "type": "extraction_regression",
+                "fields": regressions,
+                "text": (
+                    "a field the jury auto-confirmed was wrong — this is a P0 "
+                    "extraction bug, and the capture has been recorded"
+                ),
+            },
+        )
     # Speculative optimization: the instant state is confirmed, start solving.
     if s.puzzle_type == "factory" and s.state:
         with contextlib.suppress(Exception):
             await _start_optimize(s, seconds=10.0)
     return {"ok": True}
+
+
+#: Corrections to fields the jury auto-confirmed.  Spec 13 calls every one of
+#: these a P0 extraction bug whose fixture goes into the test set permanently,
+#: so they are appended to a file rather than only logged and forgotten.
+REGRESSION_LOG = Path("data") / "extraction_regressions.jsonl"
+
+
+def _record_auto_confirm_corrections(s: SessionState, patch: dict[str, Any]) -> list[dict[str, Any]]:
+    """A human correcting an auto-confirmed field is the failure mode that makes
+    the whole jury untrustworthy.  Record it loudly, with enough to rebuild the
+    fixture: the capture, the crop box, and what each juror actually said."""
+    hits: list[dict[str, Any]] = []
+    by_path = {v.path: v for v in s.verdicts}
+    for path, corrected in patch.items():
+        v = by_path.get(path)
+        if v is None or v.status != "unanimous" or v.value == corrected:
+            continue
+        hits.append(
+            {
+                "session_id": s.id,
+                "puzzle_type": s.puzzle_type,
+                "path": path,
+                "jury_value": v.value,
+                "corrected_value": corrected,
+                "votes": v.votes,
+                "crop": v.crop,
+                "at": time.time(),
+            }
+        )
+    if hits:
+        try:
+            REGRESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with REGRESSION_LOG.open("a") as fh:
+                for h in hits:
+                    fh.write(json.dumps(h, default=str) + "\n")
+        except OSError as exc:  # never let bookkeeping break the confirm path
+            log.warning("could not write regression log: %s", exc)
+        for h in hits:
+            log.error(
+                "P0 extraction bug: auto-confirmed %s as %r, human corrected to %r (capture %s)",
+                h["path"],
+                h["jury_value"],
+                h["corrected_value"],
+                (h["crop"] or {}).get("capture_id"),
+            )
+    return hits
 
 
 @app.post("/api/sessions/{session_id}/state")
