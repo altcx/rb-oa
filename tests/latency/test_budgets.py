@@ -189,28 +189,48 @@ def test_crop_and_downscale_budget():
     assert prepared.data_url.startswith("data:image/")
 
 
-async def test_tile_fan_out_is_concurrent():
-    """N tiles at 1.5 s must beat one call at 8 s — which only holds if the
-    fan-out is actually concurrent."""
+async def test_capture_to_reviewable_state_under_four_seconds():
+    """The M6 budget: capture to reviewable state under 4 s at p90.
+
+    Driven with a fake client pinned at 800 ms per vision call — slower than the
+    1.5 s target divided across a jury, and deliberately slow enough that a
+    serialized fan-out (six tiles x three jurors x 800 ms = 14 s) blows the
+    budget outright.  Passing therefore proves the *shape* of the pipeline, not
+    the speed of this machine.
+    """
     pipeline = pytest.importorskip("services.core.extract.pipeline")
-    calls: list[float] = []
+    grab = pytest.importorskip("services.core.capture.grab")
+    from PIL import Image
+
+    from services.core.llm.protocol import LLMResponse
+
+    concurrent = 0
+    peak = 0
 
     class SleepyClient:
         async def complete(self, **kw):
-            calls.append(time.perf_counter())
-            await asyncio.sleep(0.2)
-            from services.core.llm.protocol import LLMResponse
+            nonlocal concurrent, peak
+            concurrent += 1
+            peak = max(peak, concurrent)
+            try:
+                await asyncio.sleep(0.8)
+            finally:
+                concurrent -= 1
+            return LLMResponse(content="{}", parsed={}, latency_ms=800.0)
 
-            return LLMResponse(content="{}", parsed={}, latency_ms=200.0)
-
-        def stream(self, **kw):  # pragma: no cover - unused here
+        def stream(self, **kw):  # pragma: no cover - narration is tested elsewhere
             raise NotImplementedError
 
-    fan_out = getattr(pipeline, "extract_tiles", None)
-    if fan_out is None:
-        pytest.skip("pipeline.extract_tiles not exposed")
+    capture = grab.Capture(
+        image=Image.new("RGB", (1920, 1080), (20, 20, 20)),
+        region=grab.Rect(0, 0, 1920, 1080),
+        puzzle_type="factory",
+        tiles=[grab.Tile(name=f"m{i}", box=grab.Rect(i * 300, 0, 300, 400)) for i in range(6)],
+    )
+    pipeline.clear_speculations()
     t0 = time.perf_counter()
-    await fan_out(SleepyClient(), ["m1", "m2", "m3", "m4", "m5", "m6"])
+    await pipeline.extract(SleepyClient(), None, capture, "factory")
     elapsed = time.perf_counter() - t0
-    print(f"\n6 tiles x 200 ms fake latency: {elapsed:.2f}s wall clock")
-    assert elapsed < 0.6, "tiles were extracted serially"
+    print(f"\ncapture -> reviewable state: {elapsed:.2f}s at 800 ms/call, peak concurrency {peak}")
+    assert elapsed < 4.0, "extraction is serialized somewhere"
+    assert peak > 3, "tiles and jurors are not running concurrently"
