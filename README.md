@@ -99,10 +99,16 @@ cd apps/web && VITE_MOCK=1 npm run dev
 ## Tests
 
 ```bash
+.venv/bin/python scripts/acceptance.py             # milestone-by-milestone report
+.venv/bin/python scripts/acceptance.py M5 M6       # just these two
 .venv/bin/python -m pytest -q                      # everything
 .venv/bin/python -m pytest tests/golden -q         # the solvers' truth tests
-.venv/bin/python -m pytest tests/latency -q -m latency
+.venv/bin/python -m pytest tests/latency -q -s     # prints every measurement
 ```
+
+Run `scripts/acceptance.py` in the ten minutes before a timed run. It answers
+"is this ready" milestone by milestone, which is the question that matters then,
+and the spec's rule applies: do not proceed past a failing one.
 
 The golden factory tests carry their expected values as hand-computed arithmetic
 in comments. Golden test 10 — a machine set one unit above what upstream can
