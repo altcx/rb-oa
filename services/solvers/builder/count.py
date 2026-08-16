@@ -15,11 +15,8 @@ import numpy as np
 
 from services.core.rules.dsl import BuilderRules
 from services.solvers.builder.clip import (
-    COUNT_PASSED_MIN_PASSED,
     RULE_DEFAULTS,
     ClippedPuzzle,
-    budget_mask,
-    passes_count_matrix,
     required_capacity,
     resolve_rules,
     valid_mask,
@@ -410,6 +407,3 @@ def dp_total_feasible(cp: ClippedPuzzle, rules: BuilderRules) -> int:
 
 def count_passed_supported(rules: BuilderRules) -> bool:
     return (rules.failure_mode or RULE_DEFAULTS["failure_mode"]) == "all_must_pass"
-
-
-_ = (COUNT_PASSED_MIN_PASSED, budget_mask, passes_count_matrix)

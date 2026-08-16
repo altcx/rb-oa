@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.core.capture.grab import Capture, Rect, Tile, capture_from_image
 
@@ -40,6 +40,9 @@ class CaptureMeta(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     capture_id: str
+    #: Alias of ``capture_id``, kept in sync, because the HTTP layer and the web
+    #: client address every resource as ``id``.
+    id: str = ""
     session_id: str
     created_at: str
     monitor_index: int = 0
@@ -57,6 +60,12 @@ class CaptureMeta(BaseModel):
     grab_ms: float = 0.0
     tiles: list[dict[str, Any]] = Field(default_factory=list)
     notes: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _sync_id(self) -> "CaptureMeta":
+        if self.id != self.capture_id:
+            object.__setattr__(self, "id", self.capture_id)
+        return self
 
     @property
     def region_rect(self) -> Rect:
@@ -152,7 +161,39 @@ class CaptureStore:
         atomic_write_json(self._meta_path(sid, capture.capture_id), meta.model_dump())
         return meta
 
+    def save_bytes(
+        self,
+        data: bytes,
+        *,
+        session_id: str = "default",
+        puzzle_type: str | None = None,
+        scale: float = 1.0,
+        monitor_index: int = 0,
+        notes: dict[str, Any] | None = None,
+    ) -> CaptureMeta:
+        """Store an already-encoded image (upload path, replayed fixture, test).
+
+        Lets the tool be driven on a machine where the screen-grab backend does
+        not work at all.
+        """
+        with Image.open(io.BytesIO(data)) as im:
+            image = im.convert("RGB")
+        cap = capture_from_image(
+            image,
+            scale=scale,
+            monitor_index=monitor_index,
+            session_id=session_id,
+            puzzle_type=puzzle_type,
+            source="upload",
+        )
+        return self.save(cap, notes=notes)
+
     # -- read -----------------------------------------------------------
+    def path_for(self, capture_id: str, session_id: str | None = None) -> Path:
+        """Filesystem path of the stored PNG (for serving it straight out)."""
+        meta = self.find(capture_id, session_id)
+        return self.session_dir(meta.session_id) / meta.image
+
     def list_captures(self, session_id: str) -> list[CaptureMeta]:
         sdir = self.session_dir(session_id)
         if not sdir.exists():
@@ -220,6 +261,14 @@ class CaptureStore:
             thumb.save(buf, format="PNG")
             atomic_write_bytes(tpath, buf.getvalue())
             return thumb
+
+    def thumbnail_bytes(
+        self, capture_id: str, max_px: int = 240, session_id: str | None = None
+    ) -> bytes:
+        """PNG bytes of the thumbnail, ready for an HTTP response."""
+        self.thumbnail(capture_id, max_px, session_id)  # ensures the cache file
+        meta = self.find(capture_id, session_id)
+        return (self.session_dir(meta.session_id) / THUMB_DIRNAME / f"{capture_id}.{max_px}.png").read_bytes()
 
     def delete(self, capture_id: str, session_id: str | None = None) -> None:
         meta = self.find(capture_id, session_id)

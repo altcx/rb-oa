@@ -319,11 +319,27 @@ def test_save_list_load_thumbnail_round_trip(tmp_path: Path):
     assert [t.name for t in loaded.tiles] == ["M1"]
     assert loaded.capture_id == meta.capture_id
 
+    assert meta.id == meta.capture_id  # the web layer addresses captures as `id`
+    assert store.path_for(meta.capture_id).exists()
+
     thumb = store.thumbnail(meta.capture_id, max_px=120)
     assert max(thumb.size) == 120
     assert (tmp_path / "s1" / ".thumbs" / f"{meta.capture_id}.120.png").exists()
     # second call is served from the cache and is identical
     assert store.thumbnail(meta.capture_id, max_px=120).size == thumb.size
+
+
+def test_save_bytes_accepts_an_upload_without_a_screen(tmp_path: Path):
+    import io
+
+    buf = io.BytesIO()
+    make_image(320, 240).save(buf, format="PNG")
+    store = CaptureStore(tmp_path)
+    meta = store.save_bytes(buf.getvalue(), session_id="up", puzzle_type="builder")
+    assert meta.physical_size == [320, 240] and meta.source == "upload"
+    assert store.verify(meta.capture_id)
+    assert store.thumbnail_bytes(meta.capture_id, 64).startswith(b"\x89PNG")
+    assert [m.capture_id for m in store.list_captures("up")] == [meta.capture_id]
 
 
 def test_list_captures_is_empty_for_an_unknown_session(tmp_path: Path):

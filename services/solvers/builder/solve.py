@@ -27,8 +27,6 @@ import time
 from itertools import combinations, product
 from typing import Any, Sequence
 
-import numpy as np
-
 from services.core.rules.dsl import BuilderRules
 from services.solvers.builder import minimal as minimal_mod
 from services.solvers.builder import ordered as ordered_mod
@@ -37,7 +35,6 @@ from services.solvers.builder.clip import (
     RULE_DEFAULTS,
     ClippedPuzzle,
     clip_puzzle,
-    make_build,
     resolve_rules,
 )
 from services.solvers.builder.count import (
@@ -372,6 +369,3 @@ def _raw_passed(
                 for a in names:
                     remaining[a] -= o.requires.get(a, 0)
     return passed
-
-
-_ = (np, make_build)
