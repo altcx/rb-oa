@@ -101,7 +101,8 @@ def _coerce(previous: Any, value: Any) -> Any:
 _TOKEN = re.compile(r"([^.\[\]]+)|\[([^\]]*)\]")
 
 
-def _tokens(path: str) -> list[tuple[str, bool]]:
+def path_tokens(path: str) -> list[tuple[str, bool]]:
+    """Split a dotted field path into ``(token, is_list_key)`` pairs."""
     out: list[tuple[str, bool]] = []
     for m in _TOKEN.finditer(path):
         out.append((m.group(1), False) if m.group(1) is not None else (m.group(2), True))
@@ -111,12 +112,13 @@ def _tokens(path: str) -> list[tuple[str, bool]]:
 def _set_path(doc: Any, path: str, value: Any) -> None:
     """Write ``value`` at ``path`` *in place*.
 
-    Deliberately not ``unflatten(flatten(doc) | change)``: that round trip loses
-    empty lists and empty dicts, and "no mods installed" is not the same fact as
-    "mods not read".
+    Deliberately not ``unflatten(flatten(doc) | change)`` even though that round
+    trip is now lossless: rebuilding two hundred fields to change two is the
+    wrong operation, and it would make any future gap in ``flatten`` a silent
+    data loss in the one path whose whole job is to preserve what did not move.
     """
     cursor = doc
-    parts = _tokens(path)
+    parts = path_tokens(path)
     for i, (name, is_index) in enumerate(parts):
         last = i == len(parts) - 1
         if is_index:
@@ -160,6 +162,12 @@ def apply_changes(
             rejected.append(change.path)
             continue
         old = prev_flat[change.path]
+        if isinstance(old, (list, dict)):
+            # The wire carries scalars only, so a "change" aimed at a container
+            # can only be a misunderstanding -- reject it rather than replacing
+            # a recipe list with a string.
+            rejected.append(change.path)
+            continue
         value = _coerce(old, change.value)
         if value == old and type(value) is type(old):
             no_ops.append(change.path)

@@ -706,13 +706,25 @@ def _schema_by_name(name: str) -> Any:
 
 
 def _null_document(schema: Any) -> dict[str, Any]:
-    """"I cannot read this" in the shape the schema demands."""
+    """"I cannot read this" in the shape the schema demands.
+
+    Nullable fields come back null, never ``[]``: an empty list would claim the
+    panel has no recipes, which is a reading, not an admission of failure.  Only
+    a list field the schema forbids nulling gets an empty list.
+    """
     if schema is None:
         return {}
+    import typing
+
     out: dict[str, Any] = {}
     for fname, finfo in schema.model_fields.items():
-        ann = str(finfo.annotation)
-        out[fname] = [] if ann.startswith("list[") else None
+        ann = finfo.annotation
+        if type(None) in typing.get_args(ann):
+            out[fname] = None
+        elif typing.get_origin(ann) is list:
+            out[fname] = []
+        else:
+            out[fname] = None
     return out
 
 

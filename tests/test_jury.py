@@ -18,6 +18,7 @@ from services.core.extract.schemas import (
     MachinePanelExtraction,
     TopologyExtraction,
     flatten,
+    unflatten,
 )
 from services.core.llm.protocol import LLMResponse, Usage
 
@@ -252,13 +253,22 @@ async def test_majority_null_is_disputed_never_auto_confirmed():
     assert "not legible" in v.reason
 
 
-async def test_unanimous_null_is_also_disputed():
+async def test_unanimous_null_auto_confirms_as_absent():
+    """Three readers agreeing a field is not on screen is agreement.
+
+    Asking a human to confirm that a maker has no sale price is exactly the
+    review load the jury exists to remove.  (Whether the *solver* needs the
+    field is a question only the assembler can answer, so the pipeline -- not
+    the jury -- demotes these again; see test_pipeline.)
+    """
     client = ScriptedClient({m: machine(storage_max=None) for m in MODELS})
     result = await jury(client)
     v = result.verdict("storage_max")
     assert v.status == "unanimous" and v.value is None
-    assert v.auto_confirmed is False and "storage_max" in result.disputed
-    assert v.confidence < 1.0
+    assert v.auto_confirmed is True
+    assert "storage_max" in result.auto_confirmed
+    assert "storage_max" not in result.disputed
+    assert "not shown" in v.reason
 
 
 async def test_voting_is_per_field_path_even_when_machines_are_listed_in_a_different_order():
@@ -308,6 +318,52 @@ async def test_edge_normalizer_makes_graph_order_irrelevant():
     assert all(v.status == "unanimous" for v in result.verdicts)
     edges = TopologyExtraction.model_validate(result.merged).edges
     assert {(e["src"], e["dst"]) for e in edges} == {("M1", "M2"), ("M2", "M3")}
+
+
+async def test_empty_containers_are_a_vote_of_their_own():
+    """"No mods installed" is a reading; it must not vanish from the ballot."""
+    client = ScriptedClient({m: machine(installed_mods=[], current_storage={}) for m in MODELS})
+    result = await jury(client)
+    assert result.verdict("installed_mods").value == []
+    assert result.verdict("installed_mods").auto_confirmed
+    assert result.verdict("current_storage").value == {}
+    merged = MachinePanelExtraction.model_validate(result.merged)
+    assert merged.installed_mods == [] and merged.current_storage == {}
+
+
+async def test_empty_against_non_empty_is_a_disagreement_not_a_crash():
+    """One reader sees no mods, two read one: the merge must survive it."""
+    client = ScriptedClient(
+        {
+            MODELS[0]: machine(installed_mods=[]),
+            MODELS[1]: machine(installed_mods=["half_materials"]),
+            MODELS[2]: machine(installed_mods=["half_materials"]),
+        }
+    )
+    result = await jury(client)
+    merged = MachinePanelExtraction.model_validate(result.merged)
+    assert merged.installed_mods == ["half_materials"]  # children beat the empty marker
+    assert result.verdict("installed_mods").status == "split"  # and the clash is flagged
+
+
+def test_flatten_keeps_empty_containers_and_unflatten_restores_them():
+    doc = {"machines": [{"id": "M1", "installed_mods": [], "current_storage": {}}]}
+    flat = flatten(doc)
+    assert flat["machines[M1].installed_mods"] == []
+    assert flat["machines[M1].current_storage"] == {}
+    assert unflatten(flat) == doc
+    assert flatten({}) == {} and unflatten({}) == {}
+
+
+def test_unflatten_is_total_when_paths_conflict():
+    """A jury of disagreeing models can produce a container and its children."""
+    conflicting = {
+        "machines[M1].installed_mods": None,
+        "machines[M1].installed_mods[0]": "half_materials",
+    }
+    expected = {"machines": [{"installed_mods": ["half_materials"]}]}
+    assert unflatten(conflicting) == expected
+    assert unflatten(dict(reversed(list(conflicting.items())))) == expected
 
 
 async def test_sort_edges_is_a_pure_reindex():

@@ -24,7 +24,7 @@ import asyncio
 import hashlib
 import inspect
 import time
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,7 +37,7 @@ from services.core.capture.grab import (
     prepare,
 )
 from services.core.extract import prompts
-from services.core.extract.delta import DeltaResult, extract_delta_detailed
+from services.core.extract.delta import DeltaResult, extract_delta_detailed, path_tokens
 from services.core.extract.jury import FieldVerdict, JuryResult, run_jury, sort_edges
 from services.core.extract.schemas import (
     BuilderExtraction,
@@ -270,6 +270,69 @@ async def _topology_call(
 # --------------------------------------------------------------------------
 
 
+def _needed_paths(missing: Sequence[str], paths: Iterable[str]) -> set[str]:
+    """Which extracted paths the assembler said it could not fill.
+
+    ``to_factory_state`` / ``to_builder_puzzle`` are the authority on what the
+    solver reads: a field that never shows up in their ``missing`` list is a
+    field nothing downstream touches.  Their entries are patterns rather than
+    exact paths -- ``machines[?].id_or_kind`` when the id itself was unreadable,
+    ``topology.edges`` standing for the whole edge list -- so match by token with
+    ``?`` as a wildcard and a prefix counting as a hit.
+    """
+    patterns: list[list[tuple[str, bool]]] = []
+    for m in missing:
+        if m.endswith(".id_or_kind"):
+            base = m[: -len("id_or_kind")]
+            patterns += [path_tokens(base + "id"), path_tokens(base + "kind")]
+        else:
+            patterns.append(path_tokens(m))
+    out: set[str] = set()
+    for path in paths:
+        tokens = path_tokens(path)
+        for pat in patterns:
+            if len(pat) > len(tokens):
+                continue
+            if all(
+                (p_name == t_name or (p_is_idx and p_name == "?" and t_is_idx))
+                and p_is_idx == t_is_idx
+                for (p_name, p_is_idx), (t_name, t_is_idx) in zip(pat, tokens)
+            ):
+                out.add(path)
+                break
+    return out
+
+
+def _demote_needed_nulls(
+    provenance: Sequence[FieldProvenance], missing: Sequence[str]
+) -> list[str]:
+    """Un-confirm unanimous nulls on fields the solver actually needs.
+
+    Absent is fine.  Silently defaulted is not: if every reader failed on a
+    number the simulator will index with, that is the one null a human has to
+    resolve.  Returns the demoted paths so they join the unresolved list.
+    """
+    candidates = [p.path for p in provenance if p.auto_confirmed and p.value is None]
+    if not candidates:
+        return []
+    needed = _needed_paths(missing, candidates)
+    # A record the assembler had to drop for an unreadable id takes its whole
+    # panel with it: we know nothing about that machine or part, so none of its
+    # nulls may be confirmed as "absent".  Otherwise a reviewer who fixes the id
+    # inherits a weight of 0 -- a free part -- that nobody was ever asked about.
+    dropped = {p.rsplit(".", 1)[0] for p in needed if p.rsplit(".", 1)[-1] in ("id", "kind")}
+    needed |= {
+        c for c in candidates if any(c.startswith(prefix + ".") for prefix in dropped)
+    }
+    demoted: list[str] = []
+    for p in provenance:
+        if p.path in needed and p.auto_confirmed and p.value is None:
+            p.auto_confirmed = False
+            p.reason = "unreadable, and the solver needs it: fill this in"
+            demoted.append(p.path)
+    return demoted
+
+
 async def _run_tile(
     client: LLMClient,
     roles: ExtractRoles,
@@ -399,8 +462,6 @@ async def _extract_full(
     pieces: list[tuple[Tile, JuryResult]] = []
     juries: dict[str, JuryResult] = {}
     provenance: list[FieldProvenance] = []
-    auto: list[str] = []
-    disputed: list[str] = []
     n_calls = 0
     for (cap, tile, prep), outcome in zip(jobs, results):
         if isinstance(outcome, BaseException):
@@ -430,13 +491,19 @@ async def _extract_full(
                     reason=v.reason,
                 )
             )
-            (auto if v.auto_confirmed else disputed).append(path)
 
     # ---- reassemble ----------------------------------------------------
     t0 = time.perf_counter()
     doc = _merge_documents(puzzle_type, pieces)
     state, puzzle, missing, asm_errors = _assemble(puzzle_type, doc)
     errors.update(asm_errors)
+
+    # The assembler is the authority on what the solver needs, so the
+    # auto-confirm decision for unanimous nulls can only be made here.
+    demoted = _demote_needed_nulls(provenance, missing)
+    auto = [p.path for p in provenance if p.auto_confirmed]
+    disputed = [p.path for p in provenance if not p.auto_confirmed and p.path not in demoted]
+    unresolved = sorted(set(missing) | set(demoted))
     await _emit(on_stage, "assemble", (time.perf_counter() - t0) * 1000.0, stage_ms)
 
     elapsed = (time.perf_counter() - t_start) * 1000.0
@@ -447,7 +514,7 @@ async def _extract_full(
         extraction=doc,
         factory_state=state,
         builder_puzzle=puzzle,
-        unresolved=missing,
+        unresolved=unresolved,
         auto_confirmed=sorted(auto),
         disputed=sorted(disputed),
         provenance=provenance,

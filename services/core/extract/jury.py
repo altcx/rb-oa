@@ -8,9 +8,15 @@ which turns agreement into evidence.
 
 What that buys, per field path (not per document):
 
-* three agree      -> auto-confirmed, never shown to the user;
+* three agree      -> auto-confirmed, never shown to the user.  A unanimous
+                      *null* counts: three readers agreeing a field is not on
+                      the screen is agreement, and the field is absent, not
+                      unread.  (The pipeline demotes it if the assembler turns
+                      out to need it -- see ``pipeline._needed_paths``.)
 * two agree        -> pre-filled with the majority value and flagged: one
-                      keystroke to accept;
+                      keystroke to accept.  A *majority* null stays flagged:
+                      two readers seeing nothing against one reading a number is
+                      a real disagreement about the screen.
 * three differ     -> shown empty, with the crop id and field path recorded so
                       the review UI can zoom the source crop to that field.
 
@@ -46,7 +52,9 @@ class FieldVerdict(BaseModel):
     alternatives: list[Any] = Field(default_factory=list)
     #: which crop this field was read from, so the UI can zoom to it
     crop_id: str | None = None
-    #: True only for a unanimous, non-null value: never shown to the user
+    #: True for a unanimous verdict -- including a unanimous null, which means
+    #: "every reader agrees this is not on the screen".  Never shown to the user
+    #: unless the pipeline finds the assembler needs the field.
     auto_confirmed: bool = False
     #: Why a field needs a human, when it does.
     reason: str = ""
@@ -213,12 +221,14 @@ def _tally(
     coverage = voters / n_models if n_models else 0.0
     confidence = agreement * (0.5 + 0.5 * coverage)
     reason = ""
-    auto = status == "unanimous" and winner is not None
+    auto = status == "unanimous"
     if status == "unanimous" and winner is None:
-        # Every model said "not legible".  That is information, and it is
-        # information the user has to act on -- it is never a confirmed value.
-        reason = "all models returned null: not legible"
-        confidence *= 0.5
+        # Every reader agrees the field is not on the screen.  That is agreement,
+        # so it auto-confirms as *absent* -- asking a human to confirm that a
+        # maker has no sale price is exactly the review load this exists to kill.
+        # The pipeline demotes this again if the assembler turns out to need the
+        # field: absent is fine, silently-defaulted is not.
+        reason = "all readers agree this field is not shown"
     elif status == "majority" and winner is None:
         reason = "majority returned null: not legible"
         confidence *= 0.5
@@ -349,7 +359,10 @@ async def run_jury(
             errors[tie_breaker] = f"{type(exc).__name__}: {exc}"
 
     for v in verdicts:
-        v.auto_confirmed = v.status == "unanimous" and v.value is not None
+        # A unanimous null auto-confirms as "absent"; a *majority* null does not,
+        # because two readers saying "nothing there" against one reading a number
+        # is a genuine disagreement about what is on the screen.
+        v.auto_confirmed = v.status == "unanimous"
 
     merged_flat = {v.path: v.value for v in verdicts}
     auto = [v.path for v in verdicts if v.auto_confirmed]

@@ -210,7 +210,8 @@ async def test_assembles_into_factory_state_with_provenance_and_unresolved_field
     assert result.unresolved == []  # nothing the assembler needed was missing
 
 
-async def test_missing_fields_are_reported_as_unresolved_not_defaulted():
+async def test_a_needed_field_nobody_could_read_is_never_silently_defaulted():
+    """The one null that must reach a human: unreadable *and* load-bearing."""
     client = SleepyClient(
         0.0,
         overrides={
@@ -221,12 +222,70 @@ async def test_missing_fields_are_reported_as_unresolved_not_defaulted():
         },
     )
     result = await extract(client, ROLES, [board(2)], "factory")
-    assert "hud.money" in result.unresolved
-    assert "machines[M1].storage_max" in result.unresolved
-    assert "machines[M1].output_max" in result.unresolved
+
+    for path in ("hud.money", "machines[M1].storage_max", "machines[M1].output_max"):
+        prov = result.provenance_for(path)
+        assert prov.status == "unanimous" and prov.value is None
+        assert prov.auto_confirmed is False, f"{path} was silently defaulted"
+        assert path not in result.auto_confirmed
+        assert path in result.unresolved
+        assert "solver needs it" in prov.reason
     assert set(result.needs_review()) >= set(result.unresolved)
-    # unanimous nulls are still flagged for a human
-    assert "machines[M1].storage_max" in result.disputed
+    # the solver still got a state, with the gaps named rather than guessed
+    assert result.factory_state.machines[0].storage_max == 0
+
+
+async def test_a_field_the_solver_never_reads_auto_confirms_as_absent():
+    """The 90-second verification killer: nobody is asked about fields that
+    are not on the screen and that nothing downstream reads."""
+    client = SleepyClient(
+        0.0,
+        overrides={
+            "MachinePanelExtraction": lambda model, hint: machine_doc(
+                hint, name=None, current_storage=None, installed_mods=[]
+            ),
+            "FactoryHUDExtraction": {"money": 500.0, "horizon_hours": 24, "hour_now": None},
+        },
+    )
+    result = await extract(client, ROLES, [board(2)], "factory")
+
+    for path in ("hud.hour_now", "machines[M1].name", "machines[M1].current_storage"):
+        prov = result.provenance_for(path)
+        assert prov.value is None and prov.status == "unanimous"
+        assert prov.auto_confirmed is True, f"{path} costs a keystroke for nothing"
+        assert path in result.auto_confirmed
+        assert path not in result.disputed and path not in result.unresolved
+    # an empty list is a reading, not an absence, and it survives the merge
+    assert result.provenance_for("machines[M1].installed_mods").value == []
+    assert result.unresolved == []
+
+
+async def test_no_auto_confirmed_field_is_ever_wrong_or_load_bearing_and_null():
+    """The two safety properties, asserted together over a whole board."""
+    client = SleepyClient(
+        0.0,
+        overrides={
+            "MachinePanelExtraction": lambda model, hint: machine_doc(hint, output_max=None),
+        },
+    )
+    result = await extract(client, ROLES, [board(3)], "factory")
+    checked = 0
+    for path in result.auto_confirmed:
+        prov = result.provenance_for(path)
+        # every auto-confirm is backed by unanimous agreement...
+        assert prov.status == "unanimous"
+        assert len(set(map(repr, prov.votes.values()))) == 1
+        # ...and no auto-confirmed null is a field the assembler needed
+        assert path not in result.unresolved
+        if path.startswith("machines["):
+            mid, _, leaf = path[len("machines[") :].partition("].")
+            truth = flatten(machine_doc(mid, output_max=None))
+            assert leaf in truth, f"{path} is not even a field of the panel"
+            assert prov.value == truth[leaf], f"{path} auto-confirmed wrongly"
+            checked += 1
+    assert checked > 20
+    assert "machines[M1].output_max" in result.unresolved
+    assert not (set(result.auto_confirmed) & set(result.disputed))
 
 
 async def test_builder_board_assembles_into_a_builder_puzzle():

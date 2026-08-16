@@ -184,22 +184,76 @@ async def test_an_illegible_crop_produces_nulls_rather_than_guesses(fixtures_dir
 
     m1 = [p for p in result.provenance if p.tile == "M1"]
     assert m1, "the M1 tile must still appear"
-    assert all(p.value is None for p in m1)
-    assert all(not p.auto_confirmed for p in m1)  # unanimous null is never confirmed
-    assert all("not legible" in p.reason for p in m1)
-    assert all(p.path in result.disputed for p in m1)
-    # ...and the assembler reports it rather than inventing a machine
+    assert all(p.value is None for p in m1), "an illegible crop must not be guessed at"
+    assert all(p.status == "unanimous" for p in m1)
+    # the fields the solver needs are held back for a human...
+    needed = [p for p in m1 if p.path.endswith((".id", ".kind"))]
+    assert needed and all(not p.auto_confirmed for p in needed)
+    assert all(p.path in result.unresolved for p in needed)
+    # ...and the rest are simply absent, costing nobody a keystroke
+    assert any(p.auto_confirmed for p in m1)
+    # the assembler reports the hole rather than inventing a machine
     assert result.factory_state is not None
     assert "M1" not in [m.id for m in result.factory_state.machines]
     assert any("id_or_kind" in u for u in result.unresolved)
 
+    # Practice mode still calls this out, and should: a field that WAS on the
+    # screen and that nobody could read is a real alarm before the clock starts.
+    # What matters is that the alarm is about nulls, never about invented values.
     _, wrongs = score_fixture(fixtures[0], result)
-    assert wrongs == []  # nulls are never wrong auto-confirms
+    assert wrongs, "an unreadable crop must not pass practice silently"
+    assert all(w.confirmed is None for w in wrongs), "practice saw a fabricated value"
+    assert all(w.tile == "M1" for w in wrongs)  # scoped to the illegible crop
 
 
 # --------------------------------------------------------------------------
 # the detector itself
 # --------------------------------------------------------------------------
+
+
+async def test_the_two_safety_properties_hold_under_every_failure_mode(fixtures_dir):
+    """No auto-confirmed field is ever fabricated, and no field the solver needs
+    is ever silently defaulted -- clean, with a misreading juror, and with a
+    crop nobody can read."""
+    from services.core.extract.pipeline import extract
+
+    scenarios: dict[str, dict] = {
+        "clean": {},
+        "one juror misreads": {
+            "errors": {MODELS[2]: [ErrorSpec(paths=("*weight", "*output_max"), mode="corrupt")]}
+        },
+        "an illegible panel": {"illegible": ["M1", "P1"]},
+    }
+    for puzzle in ("factory", "builder"):
+        for label, kw in scenarios.items():
+            client = FakeVisionClient.from_dir(fixtures_dir, puzzle, **kw)
+            for fx in load_fixtures(fixtures_dir, puzzle):
+                result = await extract(client, ROLES, [fx.as_capture()], puzzle)
+                needed = set(result.unresolved)
+                silent = [p.path for p in result.provenance if p.auto_confirmed and p.path in needed]
+                assert not silent, f"{puzzle}/{label}: solver-critical fields defaulted: {silent}"
+                _, wrongs = score_fixture(fx, result)
+                fabricated = [w for w in wrongs if w.confirmed is not None]
+                assert not fabricated, f"{puzzle}/{label}: {fabricated[0].as_text()}"
+
+
+async def test_a_dropped_record_takes_its_whole_panel_into_review(fixtures_dir):
+    """An unreadable id drops the part; its other nulls must not read as 'absent'.
+
+    Otherwise a reviewer who fixes the id inherits weight 0 -- a free part the
+    solver will happily use -- without ever being asked.
+    """
+    from services.core.extract.pipeline import extract
+
+    client = FakeVisionClient.from_dir(fixtures_dir, "builder", illegible=["P1"])
+    fx = load_fixtures(fixtures_dir, "builder", limit=1)[0]
+    result = await extract(client, ROLES, [fx.as_capture()], "builder")
+
+    p1 = [p for p in result.provenance if p.tile == "P1"]
+    assert p1 and not any(p.auto_confirmed for p in p1)
+    assert {"parts[P1].id", "parts[P1].weight"} <= set(result.unresolved)
+    # a legible neighbour is untouched: the blast radius is one panel
+    assert sum(1 for p in result.provenance if p.tile == "P2" and p.auto_confirmed) >= 5
 
 
 async def test_a_correlated_error_across_all_three_models_is_reported_as_a_hard_failure(

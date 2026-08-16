@@ -288,9 +288,16 @@ def flatten(obj: Any, prefix: str = "") -> dict[str, Any]:
     if isinstance(obj, BaseModel):
         obj = obj.model_dump()
     if isinstance(obj, dict):
+        if not obj and prefix:
+            # An empty container is a *fact* ("no mods installed"), not an
+            # absence ("mods not read").  Emitting it keeps the round trip
+            # lossless and lets the jury vote on emptiness itself.
+            out[prefix] = {}
         for k, v in obj.items():
             out.update(flatten(v, f"{prefix}.{k}" if prefix else str(k)))
     elif isinstance(obj, list):
+        if not obj and prefix:
+            out[prefix] = []
         for i, v in enumerate(obj):
             key = None
             if isinstance(v, dict):
@@ -304,11 +311,26 @@ def flatten(obj: Any, prefix: str = "") -> dict[str, Any]:
 
 
 def unflatten(flat: dict[str, Any]) -> dict[str, Any]:
-    """Inverse of :func:`flatten` for dict/list structures."""
+    """Inverse of :func:`flatten` for dict/list structures.
+
+    Total by construction: a jury can hand this a *conflicting* path set (one
+    model votes ``mods = []`` while two vote ``mods[0] = "half_materials"``), and
+    a merge that crashed on the disagreement would be worse than useless.  The
+    rule is "children win": a subtree always beats an empty-container or scalar
+    marker written at the same path, whichever order they arrive in.
+    """
     import re
 
     root: dict[str, Any] = {}
     token = re.compile(r"([^.\[\]]+)|\[([^\]]*)\]")
+
+    def _descend(container: dict, name: str) -> dict:
+        node = container.get(name)
+        if not isinstance(node, dict):
+            node = {}
+            container[name] = node
+        return node
+
     for path, value in flat.items():
         parts: list[tuple[str, bool]] = []
         for m in token.finditer(path):
@@ -319,17 +341,15 @@ def unflatten(flat: dict[str, Any]) -> dict[str, Any]:
         cursor: Any = root
         for i, (name, is_index) in enumerate(parts):
             last = i == len(parts) - 1
-            if is_index:
-                container = cursor.setdefault("__list__", {}) if isinstance(cursor, dict) else cursor
-                if last:
-                    container[name] = value
-                else:
-                    cursor = container.setdefault(name, {})
-            else:
-                if last:
+            if is_index and isinstance(cursor, dict):
+                cursor = cursor.setdefault("__list__", {})
+            if not isinstance(cursor, dict):
+                break  # a scalar sits where a container was expected; children win
+            if last:
+                if not isinstance(cursor.get(name), dict):
                     cursor[name] = value
-                else:
-                    cursor = cursor.setdefault(name, {})
+            else:
+                cursor = _descend(cursor, name)
     return _collapse_lists(root)
 
 
