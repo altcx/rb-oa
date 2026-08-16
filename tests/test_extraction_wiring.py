@@ -161,3 +161,31 @@ def test_capture_upload_starts_speculative_extraction(wired, tmp_path, monkeypat
             },
         )
     assert r.status_code == 200 and r.json()["capture_id"]
+
+
+async def test_fields_needing_a_human_sort_to_the_top(wired, tmp_path):
+    """A unanimous null on a field the solver needs reads as 'unanimous' but is
+    exactly what the user must fill. Sorting on status alone buries it under
+    every settled field on the board."""
+    session = session_mod.sessions.create("factory")
+    meta, _ = _store_first_fixture(session.id, tmp_path)
+    await wired.run_extraction(session.id, [meta.id], "factory")
+
+    verdicts = session_mod.sessions.get(session.id).verdicts
+    needs_human = [i for i, v in enumerate(verdicts) if not v.auto_confirmed]
+    settled = [i for i, v in enumerate(verdicts) if v.auto_confirmed]
+    if needs_human and settled:
+        assert max(needs_human) < min(settled), "review work is buried below settled fields"
+    # and the reason survives, since it is what tells the user how far to trust
+    # a pre-filled value
+    assert any(v.reason for v in verdicts)
+
+
+async def test_alternatives_are_distinct(wired, tmp_path):
+    """Two models returning the same wrong value is one alternative, not two."""
+    session = session_mod.sessions.create("factory")
+    meta, _ = _store_first_fixture(session.id, tmp_path)
+    await wired.run_extraction(session.id, [meta.id], "factory")
+    for v in session_mod.sessions.get(session.id).verdicts:
+        reprs = [repr(a) for a in v.alternatives]
+        assert len(reprs) == len(set(reprs))

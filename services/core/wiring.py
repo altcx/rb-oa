@@ -243,19 +243,40 @@ def apply_extraction(s: SessionState, result: Any) -> None:
     s.unresolved = result.needs_review()
     verdicts: list[FieldVerdictView] = []
     for p in result.provenance:
+        # Distinct votes only: two models returning the same wrong value is one
+        # alternative to consider, not two.
+        alts: dict[str, Any] = {}
+        for v in p.votes.values():
+            if v != p.value:
+                alts.setdefault(repr(v), v)
         verdicts.append(
             FieldVerdictView(
                 path=p.path,
                 value=p.value,
                 status=p.status if p.status in {"unanimous", "majority", "split"} else "split",
                 votes=p.votes,
-                alternatives=[v for v in p.votes.values() if v != p.value],
+                alternatives=list(alts.values()),
                 confidence=p.confidence,
-                crop={"capture_id": p.capture_id, "box": p.box, "tile": p.tile} if p.box else None,
+                auto_confirmed=p.auto_confirmed,
+                reason=p.reason,
+                crop=(
+                    {
+                        "capture_id": p.capture_id,
+                        "box": p.box,
+                        "tile": p.tile,
+                        "crop_id": p.crop_id,
+                    }
+                    if p.box
+                    else None
+                ),
             )
         )
+    # Anything still needing a human comes first, whatever its status: a
+    # unanimous null on a field the solver needs reads as "unanimous" but is
+    # exactly the field the user must fill, and sorting on status alone buries
+    # it under every settled field on the board.
     order = {"split": 0, "majority": 1, "unanimous": 2}
-    verdicts.sort(key=lambda v: (order.get(v.status, 0), v.path))
+    verdicts.sort(key=lambda v: (v.auto_confirmed, order.get(v.status, 0), v.path))
     s.verdicts = verdicts
     s.latency = {**s.latency, **result.stage_ms, "extraction_total": result.elapsed_ms}
     sessions.save(s)

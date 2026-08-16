@@ -50,6 +50,13 @@ class FieldVerdictView(BaseModel):
     alternatives: list[Any] = Field(default_factory=list)
     confidence: float = 1.0
     crop: dict[str, Any] | None = None
+    #: Not derivable from ``status``: a unanimous null on a field the solver
+    #: needs is demoted, so it reads "unanimous" while still requiring a human.
+    auto_confirmed: bool = True
+    #: Why this field looks the way it does — the difference between "one cheap
+    #: read, confirm before solving" and "majority value, one keystroke to
+    #: accept". This is what tells the user how far to trust a pre-filled value.
+    reason: str = ""
 
 
 class SessionState(BaseModel):
