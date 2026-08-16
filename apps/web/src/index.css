@@ -1,0 +1,93 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Surfaces — dark only. This tool is used on a second monitor beside a game. */
+  --color-ink-950: #08090b;
+  --color-ink-900: #0b0d10;
+  --color-ink-850: #101318;
+  --color-ink-800: #151920;
+  --color-ink-750: #1a1f27;
+  --color-ink-700: #232a34;
+  --color-ink-600: #313a47;
+  --color-ink-500: #4a5563;
+  --color-ink-400: #7d8794;
+  --color-ink-300: #a7b1bd;
+  --color-ink-200: #ccd4dd;
+  --color-ink-100: #e6edf3;
+
+  /* Categorical series, stepped for a dark surface (validated palette). */
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+
+  /* Status. Reserved — never reused as a series colour. */
+  --color-good: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* The HUD window is 240x80 and must never scroll or paint a background the
+   compositor would show around the game. */
+body:has(.hud-root) {
+  background: transparent;
+  overflow: hidden;
+}
+
+/* Tabular figures everywhere a number is compared against another number. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-series-1);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-600);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-500);
+}
+
+/* Recharts overrides: recessive grid + axes, no default white tooltip. */
+.recharts-cartesian-grid line {
+  stroke: var(--color-ink-750);
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: var(--color-ink-700);
+}
+.recharts-surface:focus {
+  outline: none;
+}
