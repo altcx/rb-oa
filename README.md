@@ -73,22 +73,103 @@ apps/web/             React 19 + Vite + Tailwind + recharts
 tests/                golden tests, fixtures, latency budgets
 ```
 
-## Running it
+## Running it — Windows
+
+**Windows 10/11 is the production platform.** Screen capture needs a real
+desktop session with the monitors attached, so this runs on the machine you are
+playing on, not in a container and not over a headless SSH session.
+
+Prerequisites: Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js LTS.
+
+```powershell
+winget install --id=astral-sh.uv
+winget install --id=OpenJS.NodeJS.LTS
+```
+
+Then, from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # venv + deps + UI build
+powershell -ExecutionPolicy Bypass -File scripts\run.ps1     # http://127.0.0.1:8765
+```
+
+`setup.ps1` is the whole first-run path; `run.ps1` starts the server and blocks
+until Ctrl+C. If you would rather type it out:
+
+```powershell
+uv venv --python 3.12 .venv
+uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+
+# build the UI once (FastAPI serves apps\web\dist; without it every page 404s)
+cd apps\web ; npm install ; npm run build ; cd ..\..
+
+$env:PYTHONUTF8 = "1"
+.venv\Scripts\python.exe -m services.core.main       # http://127.0.0.1:8765
+```
+
+Python is **3.12**, not 3.13: `ortools` and `scipy` publish cp312 wheels for
+`win_amd64`, and on 3.13 pip falls through to building `ortools` from source,
+which is not something to discover with a clock running. `pyproject.toml`
+enforces the bound.
+
+`uvicorn[standard]` lists `uvloop`, which is POSIX-only. Upstream already gates
+it behind `sys_platform != 'win32'`, so pip silently skips it on Windows and
+uvicorn uses the stock asyncio loop. Nothing to do; it is not an error.
+
+Drag the browser window to monitor 2. The HUD lives at `/hud`, settings at
+`/settings`. Paste an OpenRouter key in settings; it is validated against
+`GET /api/v1/key` before it is accepted, then stored in the Windows Credential
+Locker via `keyring`. The UI names the backend it actually used.
+
+> **On key storage.** If the Credential Locker is unavailable the tool falls
+> back to a file under `data\.secrets\`, and on Windows that file is locked down
+> with an explicit ACL (`icacls /inheritance:r /grant:r <you>:F`), read back to
+> confirm, and only then written. `os.chmod(0o600)` is meaningless on NTFS — it
+> flips the read-only attribute and leaves every other local account able to
+> read the file — so if the ACL cannot be verified the tool **refuses to store
+> the key at all** and tells you to fix the keyring. It will not claim a
+> protection it is not getting. `OPENROUTER_API_KEY` in the environment works as
+> a stopgap.
+
+### Two monitors, two DPI scalings
+
+This tool exists to sit on monitor 2 while the game runs on monitor 1, and on
+Windows those two panels very commonly run at **different DPI scaling** — a
+150% laptop panel next to a 100% external, say. That is not an edge case here,
+it is the normal configuration, and it has consequences:
+
+- **Capture coordinates are physical pixels.** `mss` reports the physical
+  desktop; the crop rectangles you draw in a UI running at a different scale are
+  logical. If the two monitors disagree about scale, a rectangle picked on one
+  does not land where you expect on the other.
+- **The process must be per-monitor DPI aware.** A process that is not gets
+  handed *virtualised* coordinates by Windows — the OS lies to it consistently
+  and the capture silently reads the wrong region, or a blurry upscaled one.
+  There is no error; the extraction just gets worse.
+- **`PUZZLE_COPILOT_DPI_SCALE` is a single global override.** It applies one
+  factor to every monitor, which is correct on a uniform setup and wrong on a
+  mixed one. If your monitors differ, this is the knob that cannot express it.
+- **Practical advice:** set both monitors to the same scaling for a run if you
+  can. If you cannot, verify a capture on monitor 1 before the clock starts —
+  a crop that is off by a scale factor is obvious in the first screenshot and
+  invisible thereafter.
+- Windows may also relocate the browser window between monitors on
+  resolution/scaling changes, which moves the HUD mid-run. Pin it before you
+  start.
+
+## Developing on Linux / macOS
+
+The tests were written on headless Linux and that is still the fastest place to
+run them. Everything except the capture layer works there; screen capture needs
+`DISPLAY` or `WAYLAND_DISPLAY` and raises `DisplayUnavailableError` when there
+is no display, so the pipeline is exercised against recorded captures instead.
 
 ```bash
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
-
-# build the UI once (FastAPI serves apps/web/dist)
 cd apps/web && npm install && npm run build && cd ../..
-
 .venv/bin/python -m services.core.main       # http://127.0.0.1:8765
 ```
-
-Drag the browser window to monitor 2. The HUD lives at `/hud`, settings at
-`/settings`. Paste an OpenRouter key in settings; it is validated against
-`GET /api/v1/key` before it is accepted and stored in the OS keyring (or a 0600
-file, and the UI says which).
 
 Front-end development without a backend:
 
@@ -98,6 +179,16 @@ cd apps/web && VITE_MOCK=1 npm run dev
 
 ## Tests
 
+Windows:
+
+```powershell
+.venv\Scripts\python.exe scripts\acceptance.py         # milestone-by-milestone report
+.venv\Scripts\python.exe scripts\acceptance.py M5 M6   # just these two
+.venv\Scripts\python.exe -m pytest -q                  # everything
+```
+
+Linux / macOS:
+
 ```bash
 .venv/bin/python scripts/acceptance.py             # milestone-by-milestone report
 .venv/bin/python scripts/acceptance.py M5 M6       # just these two
@@ -105,6 +196,21 @@ cd apps/web && VITE_MOCK=1 npm run dev
 .venv/bin/python -m pytest tests/golden -q         # the solvers' truth tests
 .venv/bin/python -m pytest tests/latency -q -s     # prints every measurement
 ```
+
+`scripts/acceptance.py` finds the interpreter under either venv layout
+(`Scripts\python.exe` or `bin/python`) and falls back to the one running it, so
+the same invocation works from an activated venv on either platform. Its output
+is pure ASCII and it forces stdout to UTF-8 before printing, because a
+`UnicodeEncodeError` from a cp1252 console is not a failure you want in the ten
+minutes before a run. Colour is emitted only when stdout is a TTY and ANSI
+processing is actually available (`NO_COLOR` disables it).
+
+`tests/test_windows_platform.py` covers the Windows-only branches from Linux by
+monkeypatching `os.name` — interpreter discovery, the ACL refusal path, console
+reconfiguration, and non-ASCII round-tripping. What it cannot cover is whether
+`icacls` really denies a second account, whether `SetConsoleMode` really flips
+a legacy conhost, or how `mss`/`pynput` behave on a real dual-monitor desktop.
+Those need a Windows machine.
 
 Run `scripts/acceptance.py` in the ten minutes before a timed run. It answers
 "is this ready" milestone by milestone, which is the question that matters then,
